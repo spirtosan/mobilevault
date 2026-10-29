@@ -182,3 +182,62 @@ The files were exposed for months before the logs start, so a leak before 15 Oct
 - The live internal app's `server.js` contains a **hard-coded session secret and hard-coded seed admin passwords**. Move them to an environment file outside the web root, and change any account that still uses a seed password.
 - The app copy's `.env` is world-readable on disk (`644`); it should be `600`.
 - The `<NOTES_DIR>` privacy page is now 403. If it is linked from an app store listing, re-allow just that page.
+
+---
+
+## Follow-up fixes 2026-10-29
+- **nginx:** the notes folder's privacy-policy page is public again (`autoindex off`; Google fetches it daily). The rest of the folder is still 403.
+- **Internal app secrets rotated:**
+  - The app copy's `.env` got a new random `SESSION_SECRET` and is now `600`.
+  - The live app's hard-coded session secret was replaced with `process.env.SESSION_SECRET`, set via pm2 and saved with `pm2 save`.
+  - The hard-coded seed admin passwords were replaced with `TRACKER_SEED_PW_1/2` env variables. Seeding is skipped when they are unset; existing users are never changed.
+  - Both apps were restarted and answer normally. User passwords will be changed by the owner.
+
+## Backup server deployed 2026-10-29
+The mvault append-only HTTPS backup API (`server/`) is live at `https://vault.<DOMAIN>/api/v1`.
+
+| Item | State |
+|---|---|
+| DNS | `vault.<DOMAIN>` A record → `<PUBLIC_IP>` ✅ |
+| Unit tests (server, Python 3.12) | 9/9 OK. They need `server/tests/__init__.py` (added) so that `python3 -m unittest -v` discovers them |
+| Service user | `mvault` (system user, no home, no shell login) |
+| Code | `/opt/mvault` (root-owned, read-only for the service); admin wrapper `/usr/local/sbin/mvault-admin` |
+| Config | `/etc/mvault/config.json` (root:mvault 0640); `backup_pins` holds the spare-key pin |
+| Client CA | `/etc/mvault/ca` (root:mvault 0750; `ca.key` 0440); EC P-256, valid until 2036 |
+| TLS | Let's Encrypt ECDSA cert for `vault.<DOMAIN>`, webroot http-01, `--reuse-key`, deploy hook reloads nginx |
+| Spare key (pin rotation) | Generated, pin stored in config, key copied to the owner's PC outside the repo, shredded on the server |
+| nginx | Separate vault server block: mTLS `optional` (required for everything except `/health` and `/pair`), rate limits, 5 MB body limit, `/` → 404. The main site does **not** request client certificates |
+| Service | `mvault.service` active, listens on **127.0.0.1:8790 only** (not reachable from the LAN). `systemd-analyze security`: **1.5 OK** |
+| Timers | `mvault-retention.timer` (daily), `mvault-mirror.timer` (hourly) |
+| Storage | `<DATA_DISK_A>/mobilevault/data` (mvault 0750) → mirror `<DATA_DISK_B>/mobilevault-mirror` (root:root, dirs 0750, files 0440; the service user cannot even list it) |
+| fail2ban | `mvault` jail on the vault access log (maxretry 10 / 10 min, ban 1 h, LAN ignored) |
+| Firewall | No change needed (80/443 already open) |
+
+### Deviations from `server/deploy/` (fixed in the repo too)
+1. **fail2ban filter never matched:** fail2ban removes the timestamp before matching, so `\[[^\]]+\]` became `\[[^\]]*\]`. Verified: 401/403 lines match, 200/409 lines don't.
+2. **Mirror would not have been root-owned:** `rsync -a` running as root keeps the source owner (`mvault`). Added `--chown=root:root`.
+3. **`http2` removed from the vault `listen` lines:** on nginx 1.24 it is a per-socket option and would also have switched the existing site's WebSocket apps to HTTP/2. The phone client works over HTTP/1.1.
+
+### End-to-end smoke test (through the public name, TLS + mTLS)
+```
+PASS health without cert  (got 200, want 200)
+PASS API without client cert is refused  (got 403, want 403)
+PASS pairing  (got 201, want 201)
+PASS upload rev 1  (got 201, want 201)
+PASS overwrite refused  (got 409, want 409)
+PASS delete refused  (got 405, want 405)
+PASS list  (got (200, [1]), want (200, [1]))
+PASS download matches  (got (200, True), want (200, True))
+PASS wrong token refused  (got 401, want 401)
+ALL PASSED
+```
+Extra checks:
+- `https://vault.<DOMAIN>/` → 404.
+- Faked `X-Client-Verify: SUCCESS` header without a certificate → 403.
+- After `mvault-admin revoke smoketest`, the same certificate → 403 `device revoked`.
+- The mirror run copied the test vault as root:root.
+- The test vault was then removed from data **and** mirror. The revoked `smoketest` entry stays in the device list as a record.
+
+### Notes
+- The mirror never deletes, so it keeps revisions that retention prunes from the data disk. It's tiny, but it grows without limit.
+- Off-site copy / restic server backup: still a separate, later task.

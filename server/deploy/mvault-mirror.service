@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirror Mobile Vault backups to the second disk (never deletes)
+RequiresMountsFor=/mnt/<DATA_DISK> /mnt/<MIRROR_DISK>
+
+[Service]
+Type=oneshot
+# Runs as root so the mirror is root-owned: the mvault service user cannot modify or delete it.
+ExecStart=/usr/bin/rsync -a --chown=root:root --chmod=D0750,F0440 /mnt/<DATA_DISK>/mobilevault/data/ /mnt/<MIRROR_DISK>/mobilevault-mirror/
+Nice=10
+IOSchedulingClass=idle

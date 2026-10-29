@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly Mobile Vault mirror
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

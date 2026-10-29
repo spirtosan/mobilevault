@@ -1,0 +1,12 @@
+# /etc/fail2ban/jail.d/mvault.local
+[mvault]
+enabled  = true
+port     = http,https
+filter   = mvault
+logpath  = /var/log/nginx/mvault.access.log
+backend  = auto
+maxretry = 10
+findtime = 10m
+bantime  = 1h
+# LAN incl. the router (NAT loopback makes LAN requests arrive from the router address)
+ignoreip = 127.0.0.1/8 <LAN_SUBNET>

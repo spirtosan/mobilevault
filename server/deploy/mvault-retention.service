@@ -1,0 +1,16 @@
+[Unit]
+Description=Mobile Vault backup retention (prune old revisions)
+
+[Service]
+Type=oneshot
+User=mvault
+Group=mvault
+Environment=PYTHONPATH=/opt/mvault
+Environment=MVAULT_CONFIG=/etc/mvault/config.json
+ExecStart=/usr/bin/python3 -m mvault.admin retention
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+IPAddressDeny=any
+ReadWritePaths=/mnt/<DATA_DISK>/mobilevault/data

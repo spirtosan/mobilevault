@@ -1,0 +1,11 @@
+{
+  "listen": "127.0.0.1",
+  "port": 8790,
+  "data_dir": "/mnt/<DATA_DISK>/mobilevault/data",
+  "state_dir": "/var/lib/mvault",
+  "ca_dir": "/etc/mvault/ca",
+  "public_url": "https://vault.<DOMAIN>/api/v1",
+  "server_cert": "/etc/letsencrypt/live/vault.<DOMAIN>/cert.pem",
+  "backup_pins": ["sha256/<BACKUP_PIN>"],
+  "max_body": 5242880
+}

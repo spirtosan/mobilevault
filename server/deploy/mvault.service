@@ -1,0 +1,46 @@
+[Unit]
+Description=Mobile Vault append-only backup API
+After=network.target
+
+[Service]
+Type=simple
+User=mvault
+Group=mvault
+Environment=PYTHONPATH=/opt/mvault
+Environment=MVAULT_CONFIG=/etc/mvault/config.json
+ExecStart=/usr/bin/python3 -m mvault.server
+Restart=on-failure
+RestartSec=5
+UMask=0027
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Only nginx on localhost may talk to it; it cannot connect anywhere else.
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadWritePaths=/var/lib/mvault /mnt/<DATA_DISK>/mobilevault/data
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

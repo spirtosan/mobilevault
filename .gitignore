@@ -22,3 +22,5 @@ keystore.properties
 # OS
 .DS_Store
 Thumbs.db
+*.tgz
+__pycache__/
