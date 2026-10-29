@@ -6,7 +6,7 @@ Goals: a recoverable master password (recovery key), an authenticated header, en
 - **DEK**: a random 32-byte data key. It encrypts the payload and never changes when the password changes.
 - **Key slots**: the DEK is wrapped (AES-256-GCM) by one or more KEKs:
   - `password` slot: KEK = Argon2id(master password, salt)
-  - `recovery` slot: KEK = Argon2id(recovery key, salt). The recovery key is 128 random bits, shown once as 24 words or a QR code on a printable **Emergency Kit**.
+  - `recovery` slot: KEK = HKDF-SHA256(recovery key, salt, info "PVAULT2 recovery"). The recovery key is **160 random bits**, shown once on a printable **Emergency Kit** as 32 Crockford-Base32 characters + a 4-character checksum, in 9 groups (`XXXX-XXXX-…`, 44 characters; O/I/L are read as 0/1/1). A slow KDF isn't needed because the key is fully random.
   - `biometric` slot: this one is **not stored in the file**. It's stored locally, with the DEK wrapped by an Android Keystore key that requires `BiometricPrompt` (StrongBox if available).
 - Changing the password only rewrites the password slot. Losing the password means unlocking with the recovery key and setting a new password.
 
@@ -40,7 +40,7 @@ Using the whole header as AAD means nobody can change the revision, slots or KDF
 `hint` is optional plaintext, readable without the password; it is tamper-proof because the header is the AAD. See ANDROID_APP_SPEC.md → Master password reminder.
 
 Slot wrapping: `AES-GCM(KEK, DEK, aad = "PVAULT2-slot:" + type + ":" + vault_id)`.
-Argon2id defaults are 64 MiB, t=3, p=1. Tune at vault creation to take about 0.5–1 s on the device, and never go below 32 MiB, t=2.
+Passwords are Unicode **NFC-normalised** before UTF-8 encoding (different keyboards produce the same key). Argon2id defaults are 64 MiB, t=3, p=1. When *reading*, files with less than 32 MiB / t=2 are refused (protection against a downgraded header). Tune at vault creation to take about 0.5–1 s on the device, and never go below 32 MiB, t=2.
 Library suggestions: Android uses BouncyCastle `Argon2BytesGenerator` (pure Java) or `argon2kt`. Desktop uses `argon2-cffi` (`hash_secret_raw`).
 
 ### Payload JSON

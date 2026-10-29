@@ -24,3 +24,4 @@ keystore.properties
 Thumbs.db
 *.tgz
 __pycache__/
+.kotlin/

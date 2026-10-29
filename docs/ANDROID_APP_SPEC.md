@@ -73,7 +73,7 @@ backup/              BackupTarget interface + HTTPS API (OkHttp) / SAF implement
 ```
 
 ## Milestones
-1. **M1 – core-crypto**: PVAULT1 decrypt passes `test-vectors/`; PVAULT2 round-trip; recovery slot.
+1. **M1 – core-crypto** ✅ (2026-10-29): `android/core-crypto`. PVAULT1 import/export, PVAULT2 with password + recovery slots, hint policy, 27 tests incl. cross-checks with the independent Python reference `android/tools/pvault2.py` in both directions.
 2. **M2 – MVP app**: create/unlock/list/edit, auto-lock, clipboard, import from desktop.
 3. **M3 – Backups**: snapshots, own-server backup + server-side archive, restore, health indicator, Emergency Kit, password hint/reminders.
 4. **M4 – Polish**: biometrics + periodic password confirmation, generator, test restore, export to desktop; optional SAF/USB target.

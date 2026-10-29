@@ -1,0 +1,44 @@
+{
+ "password": "Café ☕ correct horse",
+ "recovery_key": "N3RS-8NHY-XQXQ-0CX9-XRAB-Z5R6-N78J-YAK2-CWGQ",
+ "hint": "favourite drink + xkcd",
+ "expected": {
+  "entries": [
+   {
+    "id": "7d3f0c1e-2a4b-4c5d-8e9f-0a1b2c3d4e5f",
+    "s": "GitHub",
+    "u": "spirtosan",
+    "p": "gh-Pa$$w0rd!",
+    "url": "https://github.com",
+    "notes": "2FA on",
+    "tags": [
+     "dev"
+    ],
+    "fav": true,
+    "created": "2026-10-29T20:00:00Z",
+    "modified": "2026-10-29T20:00:00Z",
+    "deleted": false,
+    "future_field": {
+     "x": 1
+    }
+   },
+   {
+    "id": "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9",
+    "s": "Банка",
+    "u": "иван",
+    "p": "Žluťoučký kůň 🐎",
+    "url": "",
+    "notes": "",
+    "tags": [],
+    "fav": false,
+    "created": "2026-10-29T20:00:00Z",
+    "modified": "2026-10-29T20:00:00Z",
+    "deleted": false
+   }
+  ],
+  "settings": {
+   "clipboard_timeout": 30
+  },
+  "future_top": "keep me"
+ }
+}
