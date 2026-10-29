@@ -8,7 +8,7 @@
 | Crypto | `javax.crypto` AES-256-GCM, PBKDF2WithHmacSHA256 (v1 import), BouncyCastle Argon2id |
 | Key storage | Android Keystore (StrongBox if available), `androidx.biometric` BiometricPrompt (BIOMETRIC_STRONG) |
 | Background | WorkManager (backups), DataStore (non-secret settings) |
-| Network | OkHttp (WebDAV / S3), HTTPS only via `network_security_config` |
+| Network | **OkHttp** over HTTPS to the own server's append-only API; mTLS client cert in Android Keystore + bearer token + certificate pinning; no cleartext (`network_security_config`) |
 | Serialization | kotlinx.serialization |
 | Storage | one encrypted vault file in `filesDir` plus a snapshots folder (no database; everything is encrypted in a single blob, like the desktop app) |
 
@@ -28,7 +28,7 @@
 - [ ] Biometric unlock (fingerprint/face) as a convenience; the master password is still required after reboot, every 7 days, and after 5 failed biometric attempts
 - [ ] Recovery key + Emergency Kit (see BACKUP_AND_RECOVERY.md)
 - [ ] Master password reminder: hint + periodic confirmation (see below)
-- [ ] Remote backups to own Ubuntu server (SFTP or WebDAV, see SERVER_CHECK.md); optional SAF/USB copy; version history; restore; test restore; backup health indicator
+- [ ] Remote backups to own Ubuntu server via HTTPS backup API (see BACKUP_AND_RECOVERY.md); optional SAF/USB copy; version history; restore; test restore; backup health indicator
 - [ ] Local snapshot history
 - [ ] Password generator (length, character sets, passphrase mode)
 - [ ] Notes field, favourites, tags
@@ -69,7 +69,7 @@ Forgetting the master password is the most likely way to lose everything, especi
 app/                 Compose UI, navigation, ViewModels
 core-crypto/         PVAULT1 reader, PVAULT2 reader/writer, Argon2, key slots  (pure Kotlin, unit-tested)
 core-vault/          repository, atomic save, snapshots, merge
-backup/              BackupTarget interface + WebDAV / SAF / S3 implementations, WorkManager jobs
+backup/              BackupTarget interface + HTTPS API (OkHttp) / SAF implementations, WorkManager jobs
 ```
 
 ## Milestones
