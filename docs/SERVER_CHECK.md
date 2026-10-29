@@ -36,6 +36,8 @@ This was a read-only inspection of the owner's Ubuntu server, done to choose the
 
 ## Recommendation: **SFTP** (chrooted, key-only user)
 
+> **Superseded 2026-10-29:** the owner chose **HTTPS through the existing nginx** instead (see `DECISIONS.md` and `BACKUP_AND_RECOVERY.md`). SSH stays LAN-only. The SFTP-specific steps below (sections 2 and the SFTP parts of 1) will not be done. The hardening that was actually done is in [Hardening done 2026-10-29](#hardening-done-2026-10-29).
+
 Reasons:
 
 1. **Stronger auth with no extra effort.** The phone generates an Ed25519 key that is wrapped by the Android Keystore. Nothing like a password exists that could be phished, reused or guessed. WebDAV through nginx would rely on HTTP Basic auth (a static password in an htpasswd file), and nginx has no per-user write restrictions beyond that.
@@ -98,3 +100,85 @@ Order matters: harden first, then expose the backup account.
 5. **Low: `X11Forwarding yes`, no `AllowUsers/AllowGroups`, `MaxAuthTries 6`.**
 6. **Info: the TURN server's configured public IP does not match the IP the domain currently resolves to.** Either the WAN IP changed or the DNS points elsewhere. Details went to the owner directly.
 7. **OK:** unattended security upgrades are on, the TLS cert auto-renews, time is synchronised, and no security updates are pending.
+
+---
+
+## Hardening done 2026-10-29
+
+These changes were approved by the owner (Task 02 plus their follow-up answers) and done with lock-out safeguards. Those safeguards were:
+- a standby root session kept open the whole time;
+- every file backed up first (into `/root/config-backups-2026-10-29/` and `*.bak-2026-10-29`);
+- `sshd -t` / `nginx -t` before every reload;
+- a 5-minute automatic-rollback `systemd-run` timer for the sshd and ufw changes, cancelled only after new sessions tested OK.
+
+### 1. nginx: stopped publishing secrets (urgent fix)
+**Problem found:** the public web root is a whole data folder, and `location /` has `autoindex on`. Because of that, the source folder of a secondary copy of an internal web app was downloadable from the internet. That included its `.env` (session secret), its SQLite database (user accounts with bcrypt password hashes), its `server.js` and `setup.js`. A folder of app pages was also public.
+
+**Fix:** added to the HTTPS server block, before `location /`:
+```nginx
+location ^~ /.well-known/acme-challenge/ { allow all; }
+location ~ /\. { deny all; }
+location ~* \.(sqlite|sqlite3|db|env|bak|old|orig|swp|log|key|pem|vault|pvault|diary)$ { deny all; }
+location ^~ /<APP_COPY_DIR> { deny all; }
+location ^~ /<NOTES_DIR>    { deny all; }
+```
+**Verified:**
+- `.env`, `database.sqlite`, `server.js`, both folders, `/.git/config` and any `*.env`: **403**.
+- `/`, the downloads folder and the proxied app: **200**, unchanged. The other proxied app gives its usual 302.
+- The ACME path is not blocked (404 with no token).
+
+**Access-log review:** the logs, including rotated `.gz` files, cover **15–29 Oct 2026 only**. In that window:
+- **No non-LAN request** fetched the `.env`, the database or the source files.
+- Hundreds of automated scanner requests for generic paths like `/.env`, `/.git/config` and `/.env.production` all got 404.
+- Hits on the notes folder came only from Google crawlers, on a privacy-policy page.
+
+The files were exposed for months before the logs start, so a leak before 15 Oct **can't be ruled out**. Rotating the secret and passwords is recommended (owner to do).
+
+### 2. SSH: key-only
+- The owner's PC key was added for `<ADMIN_USER>`; key login and `sudo` membership were verified in a new session.
+- New `/etc/ssh/sshd_config.d/00-hardening.conf` (it sorts before `50-cloud-init.conf`; the first value wins):
+  `PermitRootLogin prohibit-password`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`, `MaxAuthTries 3`, `LoginGraceTime 30`, `X11Forwarding no`.
+- Verified: `sshd -T` shows the values. New key sessions for root and `<ADMIN_USER>` work. Password logins for both are refused (`Permission denied (publickey)`).
+- SSH is **not** port-forwarded on the router (owner), and is now LAN-only at the firewall too.
+
+### 3. Firewall (ufw): enabled
+- Default deny incoming / allow outgoing; routed traffic disabled.
+- **LAN only (`<LAN_SUBNET>`):** SSH, Samba (TCP 139/445, UDP 137/138), and the internal Node.js apps.
+- **Anywhere:** HTTP/HTTPS (nginx), and the TURN listener plus its relay UDP range as set in its config.
+- Some older, never-enabled rules were already in the ufw config: nginx profile, TURN, and a smaller relay range. They duplicate or fall inside the rules above and were left in place.
+- Docker is not installed, so nothing bypasses ufw.
+- Verified after enabling: new SSH sessions work; HTTPS by public name works (NAT loopback OK); the proxied apps answer; Samba and app ports are still reachable from the LAN.
+
+### 4. fail2ban
+- Installed (Ubuntu package 1.0.2-3ubuntu0.1). `/etc/fail2ban/jail.d/sshd.local`: `[sshd]` enabled, `maxretry = 5`, `bantime = 1h`, `ignoreip = 127.0.0.1/8 <LAN_SUBNET>`.
+- **Extra line needed:** `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`. On Ubuntu 24.04 the unit is `ssh.service`; the stock filter watches `sshd.service` and would never match anything. With the fix, a `fail2ban-regex` test over the journal matches past failed logins.
+- Service active; `fail2ban-client status sshd` OK.
+
+### 5. fstab: UUIDs + `nofail`
+- Both data disks are now mounted by `UUID=` with `defaults,nofail`, so a renamed or missing disk can't mount in the wrong place or hang the boot. The backup is `/etc/fstab.bak-2026-10-29`.
+- `findmnt --verify`: no errors (one harmless warning about the swap file). `mount -a` OK, no reboot.
+
+### Report-only findings (Part E)
+| Item | Finding |
+|---|---|
+| Public IP | The current public IP matches the domain's DNS record |
+| TURN `external-ip` | **Stale**: it contains an old public IP, so TURN relaying for clients outside the LAN is probably broken. Not changed (owner: later) |
+| Data disks | `<DATA_DISK_A>` (1.8 TB HDD): ~1.0 TB free. `<DATA_DISK_B>` (224 GB SSD): ~204 GB free |
+| Where to put `/srv/mobilevault` | Primary on `<DATA_DISK_A>`, hourly mirror to `<DATA_DISK_B>` (two physical disks) |
+| nginx | One site (`<DOMAIN>` + `www`): port 80 redirects to HTTPS, 443 serves static files + reverse proxies. A `vault.` subdomain will need its own server block |
+| certbot | nginx authenticator, i.e. **http-01**; ECDSA key; auto-renew timer active. Works for `vault.<DOMAIN>` if port 80 stays forwarded |
+| DNS | Hosted at a third-party DNS provider; a `vault.` A record has to be added in its panel (owner) |
+| Python | 3.12.3 (≥ 3.10 ✅) |
+| NAT loopback | **Works**: the server and LAN reach `https://<DOMAIN>` by its public name |
+| Server backups | Still none. Planned as a separate task (restic to the second disk + off-site) |
+
+### Not done (and why)
+- **Rotating the internal app's session secret and user passwords:** the owner asked for instructions only.
+- **TURN `external-ip`, restic server backup:** deferred by the owner.
+- **`PermitRootLogin no`:** root key login is kept for now (Task 02). Switch later once all admin work goes through `<ADMIN_USER>` + sudo.
+- **Pending package updates (3, non-security):** not in scope.
+
+### Still open (recommended)
+- The live internal app's `server.js` contains a **hard-coded session secret and hard-coded seed admin passwords**. Move them to an environment file outside the web root, and change any account that still uses a seed password.
+- The app copy's `.env` is world-readable on disk (`644`); it should be `600`.
+- The `<NOTES_DIR>` privacy page is now 403. If it is linked from an app store listing, re-allow just that page.
