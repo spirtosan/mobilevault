@@ -1,0 +1,64 @@
+# Vault format "PVAULT2" (proposed)
+
+Goals: a recoverable master password (recovery key), an authenticated header, entry IDs for sync, versioning for backups, and full read support for PVAULT1.
+
+## Envelope encryption
+- **DEK**: a random 32-byte data key. It encrypts the payload and never changes when the password changes.
+- **Key slots**: the DEK is wrapped (AES-256-GCM) by one or more KEKs:
+  - `password` slot: KEK = Argon2id(master password, salt)
+  - `recovery` slot: KEK = Argon2id(recovery key, salt). The recovery key is 128 random bits, shown once as 24 words or a QR code on a printable **Emergency Kit**.
+  - `biometric` slot: this one is **not stored in the file**. It's stored locally, with the DEK wrapped by an Android Keystore key that requires `BiometricPrompt` (StrongBox if available).
+- Changing the password only rewrites the password slot. Losing the password means unlocking with the recovery key and setting a new password.
+
+## Binary layout
+```
+0    8   MAGIC "PVAULT2\0"
+8    4   header_len (uint32, big-endian)
+12   h   header (UTF-8 JSON, see below)
+12+h 12  body nonce
+...  n   AES-256-GCM(DEK, payload_json) || tag      AAD = bytes[0 .. 12+h)
+```
+Using the whole header as AAD means nobody can change the revision, slots or KDF parameters without detection.
+
+### Header JSON
+```json
+{
+  "v": 2,
+  "vault_id": "uuid-v4",
+  "rev": 42,
+  "updated": "2026-10-29T19:07:00Z",
+  "device": "pixel8-3f2a",
+  "hint": "optional master password hint (plaintext!)",
+  "slots": [
+    {"type": "password", "kdf": {"alg": "argon2id", "m_kib": 65536, "t": 3, "p": 1, "salt": "b64"},
+     "nonce": "b64", "wrapped_dek": "b64"},
+    {"type": "recovery", "kdf": {"alg": "argon2id", "m_kib": 65536, "t": 3, "p": 1, "salt": "b64"},
+     "nonce": "b64", "wrapped_dek": "b64"}
+  ]
+}
+```
+`hint` is optional plaintext, readable without the password; it is tamper-proof because the header is the AAD. See ANDROID_APP_SPEC.md → Master password reminder.
+
+Slot wrapping: `AES-GCM(KEK, DEK, aad = "PVAULT2-slot:" + type + ":" + vault_id)`.
+Argon2id defaults are 64 MiB, t=3, p=1. Tune at vault creation to take about 0.5–1 s on the device, and never go below 32 MiB, t=2.
+Library suggestions: Android uses BouncyCastle `Argon2BytesGenerator` (pure Java) or `argon2kt`. Desktop uses `argon2-cffi` (`hash_secret_raw`).
+
+### Payload JSON
+```json
+{
+  "entries": [
+    {"id": "uuid", "s": "GitHub", "u": "me", "p": "secret", "url": "https://…",
+     "notes": "", "tags": [], "fav": false,
+     "created": "ISO-8601", "modified": "ISO-8601", "deleted": false}
+  ],
+  "settings": {"clipboard_timeout": 30, "autolock_seconds": 300}
+}
+```
+- The `s/u/p/url` keys are kept from v1, so converting is trivial.
+- `deleted: true` marks a tombstone, kept for 90 days so that a merge doesn't bring deleted entries back.
+- `rev` goes up by 1 on every save. Merging between devices uses `id` and `modified`.
+
+## Compatibility
+- Mobile **reads** PVAULT1 (import from desktop). Importing converts to PVAULT2, gives every entry a UUID, and sets timestamps to the import time.
+- Mobile can **export** a PVAULT1 file so the current desktop app can still open it (this drops notes/tags/history).
+- Recommended: add PVAULT2 read/write to the desktop app later, so both can share the same backup location.

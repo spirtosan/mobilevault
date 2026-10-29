@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+dist/
+*.pyc
+__pycache__/
+*.pyo
+
+# Sensitive data — never commit vault files
+*.vault
+*.vault.bak
+*.vault.tmp
+
+# Generated icon (reproducible from icon.png via build.bat)
+icon.ico
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal notes / diary
+*.diary

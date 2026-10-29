@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "s": "GitHub",
+      "u": "spirtosan",
+      "p": "gh-Pa$$w0rd!",
+      "url": "https://github.com"
+    },
+    {
+      "s": "Bank",
+      "u": "user@example.com",
+      "p": "Žluťoučký kůň 🐎 / Кирилица",
+      "url": ""
+    },
+    {
+      "s": "WiFi",
+      "u": "",
+      "p": "x",
+      "url": ""
+    }
+  ]
+}
