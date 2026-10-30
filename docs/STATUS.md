@@ -1,5 +1,7 @@
 # Project status: 2026-10-30
 
+> Starting a new session? Read `docs/HANDOFF.md` first.
+
 ## Done
 | Area | Result | Commit |
 |---|---|---|
@@ -30,6 +32,6 @@
 - Then M3: backup client (pairing QR → Keystore key + CSR → `/pair`, upload queue via WorkManager, restore, health indicator), Emergency Kit, password reminders.
 
 ## How work is done
-- The cloud Claude session writes code/docs into `C:\Users\spirt\mobilevault` (no GitHub access from there). The local **Claude Code** session builds, deploys to the server and pushes to GitHub using `docs/CLAUDE_CODE_TASK_NN.md` files (01–04 done).
+- The cloud Claude session writes code/docs into `C:\Users\spirt\mobilevault` (no GitHub access from there). The local **Claude Code** session builds, deploys to the server and pushes to GitHub using `docs/CLAUDE_CODE_TASK_NN.md` files (01–04 done; next is 05).
 - The repo is **public**: placeholders only (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). Real values live only on the server and in chat.
 - `*.tgz` in the project folder are transfer leftovers (git-ignored) and can be deleted.
