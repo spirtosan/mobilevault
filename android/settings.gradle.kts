@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "MobileVault"
 include(":core-crypto")
-// M2 adds:  include(":app")
+include(":app")
