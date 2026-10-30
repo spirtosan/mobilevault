@@ -1,0 +1,11 @@
+{
+ "password": "Пароль p4 ☕",
+ "recovery_key": "6RYM-6JGV-WSHM-B5GQ-8ZDB-V9KX-RX63-4GKA-3BWY",
+ "hint": "four lanes",
+ "kdf": {
+  "m_kib": 1024,
+  "t": 2,
+  "p": 4
+ },
+ "generator": "tools/pvault2.py create --m 1024 --t 2 --p 4"
+}

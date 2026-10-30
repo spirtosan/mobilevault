@@ -6,9 +6,7 @@
 package com.spirtosan.mobilevault.crypto
 
 import org.bouncycastle.crypto.digests.SHA256Digest
-import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator
-import org.bouncycastle.crypto.params.Argon2Parameters
 import org.bouncycastle.crypto.params.KeyParameter
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
@@ -62,14 +60,8 @@ internal object Crypto {
         return (g.generateDerivedParameters(len * 8) as KeyParameter).key
     }
 
-    fun argon2id(secret: ByteArray, salt: ByteArray, mKiB: Int, t: Int, p: Int, len: Int = KEY_LEN): ByteArray {
-        val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
-            .withVersion(Argon2Parameters.ARGON2_VERSION_13)
-            .withMemoryAsKB(mKiB).withIterations(t).withParallelism(p).withSalt(salt).build()
-        val out = ByteArray(len)
-        Argon2BytesGenerator().apply { init(params) }.generateBytes(secret, out)
-        return out
-    }
+    fun argon2id(secret: ByteArray, salt: ByteArray, mKiB: Int, t: Int, p: Int, len: Int = KEY_LEN): ByteArray =
+        Argon2id.hash(secret, salt, mKiB, t, p, len)
 
     /** HKDF-SHA256 (RFC 5869). */
     fun hkdf(ikm: ByteArray, salt: ByteArray, info: ByteArray, len: Int = KEY_LEN): ByteArray {

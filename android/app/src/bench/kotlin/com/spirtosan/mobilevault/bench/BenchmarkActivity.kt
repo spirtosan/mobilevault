@@ -31,6 +31,8 @@ import com.spirtosan.mobilevault.crypto.Argon2Params
 import com.spirtosan.mobilevault.crypto.Pvault1
 import com.spirtosan.mobilevault.crypto.Pvault2
 import kotlinx.coroutines.Dispatchers
+import org.bouncycastle.crypto.generators.Argon2BytesGenerator
+import org.bouncycastle.crypto.params.Argon2Parameters
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -76,6 +78,7 @@ class BenchmarkActivity : ComponentActivity() {
                 val r = withContext(Dispatchers.Default) { timeArgon2(p) }
                 emit(r)
             }
+            emit(withContext(Dispatchers.Default) { timeBouncyCastle() })
             emit(withContext(Dispatchers.Default) { timePvault1() })
             emit("DONE")
             running = false
@@ -83,7 +86,7 @@ class BenchmarkActivity : ComponentActivity() {
     }
 
     private fun timeArgon2(p: Argon2Params): String {
-        val label = "Argon2 ${p.mKiB / 1024}MiB/t${p.t}"
+        val label = "Argon2 ${p.mKiB / 1024}MiB/t${p.t}/p${p.p}"
         val creates = mutableListOf<Long>()
         val unlocks = mutableListOf<Long>()
         val perUnlock = mutableListOf<Long>()
@@ -103,6 +106,20 @@ class BenchmarkActivity : ComponentActivity() {
         } catch (e: OutOfMemoryError) {
             "$label  OOM=YES after ${creates.size} runs"
         }
+    }
+
+    /** The old implementation (BouncyCastle, single-threaded), for comparison: one Argon2 call = one unlock. */
+    private fun timeBouncyCastle(): String {
+        val times = mutableListOf<Long>()
+        repeat(RUNS) {
+            val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id).withVersion(Argon2Parameters.ARGON2_VERSION_13)
+                .withMemoryAsKB(65536).withIterations(3).withParallelism(1).withSalt(ByteArray(16)).build()
+            val out = ByteArray(32)
+            val t0 = SystemClock.elapsedRealtime()
+            Argon2BytesGenerator().apply { init(params) }.generateBytes(PASSWORD.toByteArray(), out)
+            times += SystemClock.elapsedRealtime() - t0
+        }
+        return "BouncyCastle Argon2 64MiB/t3/p1 (old)  median=${median(times)} ms  runs=${times.joinToString("/")}"
     }
 
     private fun timePvault1(): String {
@@ -125,11 +142,8 @@ class BenchmarkActivity : ComponentActivity() {
         private const val MiB = 1024 * 1024
         private const val PASSWORD = "bench-password-not-secret"
         private const val SAMPLE_PASSWORD = "correct horse battery staple"   // public test vector
-        private val CONFIGS = listOf(
-            Argon2Params(mKiB = 65536, t = 3),
-            Argon2Params(mKiB = 65536, t = 2),
-            Argon2Params(mKiB = 32768, t = 3),
-            Argon2Params(mKiB = 32768, t = 2),
-        )
+        private val CONFIGS = listOf(1, 4).flatMap { p ->
+            listOf(65536 to 3, 65536 to 2, 32768 to 3, 32768 to 2).map { (m, t) -> Argon2Params(mKiB = m, t = t, p = p) }
+        }
     }
 }

@@ -106,7 +106,7 @@ def unlock(raw, kek_fn, slot_type):
     return header, dek, json.loads(AESGCM(dek).decrypt(nonce, ct, aad))
 
 
-def create(pw, payload, hint=None, m=65536, t=3, p=1, device="python-ref"):
+def create(pw, payload, hint=None, m=65536, t=3, p=4, device="python-ref"):
     vid, dek, rk = str(uuid.uuid4()), os.urandom(32), os.urandom(20)
     pkdf = {"alg": "argon2id", "m_kib": m, "t": t, "p": p, "salt": b64(os.urandom(16))}
     rkdf = {"alg": "hkdf-sha256", "salt": b64(os.urandom(16))}
@@ -126,7 +126,7 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create"); c.add_argument("out"); c.add_argument("password"); c.add_argument("--hint")
-    c.add_argument("--m", type=int, default=65536); c.add_argument("--t", type=int, default=3); c.add_argument("--p", type=int, default=1)
+    c.add_argument("--m", type=int, default=65536); c.add_argument("--t", type=int, default=3); c.add_argument("--p", type=int, default=4)
     c.add_argument("--payload", help="JSON file with {entries:[...]}")
     o = sub.add_parser("open"); o.add_argument("file"); o.add_argument("password")
     r = sub.add_parser("recover"); r.add_argument("file"); r.add_argument("key")

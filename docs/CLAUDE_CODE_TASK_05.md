@@ -8,7 +8,7 @@ Read first: `docs/HANDOFF.md`, `docs/ANDROID_APP_SPEC.md`, `docs/VAULT_FORMAT_V2
 |---|---|---|---|
 | Huawei | 10 | 29 | **Probably no Google Play services (HMS).** The app must not use any `com.google.android.gms` / Play / ML Kit / Firebase dependency. Aggressive battery manager. Face unlock is usually weak (class 2), so only `BIOMETRIC_STRONG` counts (M3). Likely the slowest device; it sets the Argon2 budget. |
 | Motorola | 12 | 31 | Near-stock baseline. |
-| Xiaomi | 15 | 35 | HyperOS/MIUI autostart and battery restrictions. Target SDK 35 means **edge-to-edge is enforced** (handle insets). 16 KB pages: no native libs (BouncyCastle is pure Java, so it's fine). |
+| Xiaomi | 16 | 36 | HyperOS/MIUI autostart and battery restrictions. Target SDK 35 means **edge-to-edge is enforced** (handle insets). 16 KB pages: no native libs of our own (Compose's `libandroidx.graphics.path.so` is 16 KB-aligned, checked). adb install needs Developer options → "Install via USB" (Mi account). |
 
 The owner enables Developer options → USB debugging on each phone, and you install with `adb` (ask the owner to connect the phones one at a time).
 

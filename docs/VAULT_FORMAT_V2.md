@@ -30,9 +30,9 @@ Using the whole header as AAD means nobody can change the revision, slots or KDF
   "device": "pixel8-3f2a",
   "hint": "optional master password hint (plaintext!)",
   "slots": [
-    {"type": "password", "kdf": {"alg": "argon2id", "m_kib": 65536, "t": 3, "p": 1, "salt": "b64"},
+    {"type": "password", "kdf": {"alg": "argon2id", "m_kib": 65536, "t": 3, "p": 4, "salt": "b64"},
      "nonce": "b64", "wrapped_dek": "b64"},
-    {"type": "recovery", "kdf": {"alg": "argon2id", "m_kib": 65536, "t": 3, "p": 1, "salt": "b64"},
+    {"type": "recovery", "kdf": {"alg": "hkdf-sha256", "salt": "b64"},
      "nonce": "b64", "wrapped_dek": "b64"}
   ]
 }
@@ -40,8 +40,9 @@ Using the whole header as AAD means nobody can change the revision, slots or KDF
 `hint` is optional plaintext, readable without the password; it is tamper-proof because the header is the AAD. See ANDROID_APP_SPEC.md → Master password reminder.
 
 Slot wrapping: `AES-GCM(KEK, DEK, aad = "PVAULT2-slot:" + type + ":" + vault_id)`.
-Passwords are Unicode **NFC-normalised** before UTF-8 encoding (different keyboards produce the same key). Argon2id defaults are 64 MiB, t=3, p=1. When *reading*, files with less than 32 MiB / t=2 are refused (protection against a downgraded header). Tune at vault creation to take about 0.5–1 s on the device, and never go below 32 MiB, t=2.
-Library suggestions: Android uses BouncyCastle `Argon2BytesGenerator` (pure Java) or `argon2kt`. Desktop uses `argon2-cffi` (`hash_secret_raw`).
+Passwords are Unicode **NFC-normalised** before UTF-8 encoding (different keyboards produce the same key). Argon2id defaults are 64 MiB, t=3, **p=4** (since 2026-10-30; earlier files have p=1 and still open, any p in 1–16 is read). When *reading*, files with less than 32 MiB / t=2 are refused (protection against a downgraded header). At vault creation the app picks the strongest of 64/32 MiB × t3/t2 (p=4) whose unlock takes ≤ 1 s on the device, never below 32 MiB, t=2 (see the Argon2 table in DECISIONS.md).
+The recovery slot has no Argon2: the key is 160 random bits, so HKDF is enough (see above).
+Implementations: Android uses `core-crypto`'s own pure-Kotlin Argon2id (`Argon2.kt`: flat memory, lanes on parallel threads; byte-identical to RFC 9106, BouncyCastle and argon2-cffi). Desktop uses `argon2-cffi` (`hash_secret_raw`), which handles p=4 natively.
 
 ### Payload JSON
 ```json

@@ -17,10 +17,10 @@ import kotlinx.serialization.json.longOrNull
 import java.nio.ByteBuffer
 import java.util.UUID
 
-/** Argon2id cost. Defaults: 64 MiB, 3 passes, 1 lane (see docs/VAULT_FORMAT_V2.md). */
-data class Argon2Params(val mKiB: Int = 65536, val t: Int = 3, val p: Int = 1) {
+/** Argon2id cost. Defaults: 64 MiB, 3 passes, 4 lanes (see docs/VAULT_FORMAT_V2.md). Files with any p in 1..16 open. */
+data class Argon2Params(val mKiB: Int = 65536, val t: Int = 3, val p: Int = 4) {
     init {
-        require(mKiB in 8..4 * 1024 * 1024 && t in 1..64 && p in 1..16) { "Argon2 parameters out of range" }
+        require(mKiB in 8..4 * 1024 * 1024 && t in 1..64 && p in 1..16 && mKiB >= 8 * p) { "Argon2 parameters out of range" }
     }
 
     companion object {

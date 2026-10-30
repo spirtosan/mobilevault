@@ -34,7 +34,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 5. Next steps
 ### Test phones (answered 2026-10-30)
-Huawei Android 10 (API 29, **probably no Google services**, so no GMS/ML Kit/Firebase anywhere; use ZXing for QR), Motorola Android 12 (API 31), Xiaomi Android 15 (API 35, edge-to-edge, aggressive autostart limits). Android Studio is installed on the PC (JDK 21 in its `jbr`, not on PATH).
+Huawei Android 10 (API 29, **probably no Google services**, so no GMS/ML Kit/Firebase anywhere; use ZXing for QR), Motorola Android 12 (API 31), Xiaomi Android 16 (API 36, edge-to-edge, aggressive autostart limits; needs "Install via USB" + Mi account for adb installs). Android Studio is installed on the PC (JDK 21 in its `jbr`, not on PATH).
 
 ### M2 has been handed to Claude Code as `docs/CLAUDE_CODE_TASK_05.md`
 Claude Code builds the app (it has the Android SDK and the phones); the cloud session reviews. Step 1 of the task is an Argon2 benchmark on all three phones; its results set the KDF parameters.

@@ -14,7 +14,19 @@
 | 2026-10-29 | **Recovery key = 160-bit, Crockford Base32 + checksum, HKDF** (not 24 words) | No word list to ship; typo detection; QR-friendly. |
 | 2026-10-29 | **Passwords NFC-normalised in PVAULT2** | Same key from different keyboards/OSes. PVAULT1 keeps raw UTF-8 (desktop compatibility). |
 | 2026-10-29 | **core-crypto is a pure Kotlin/JVM module** (BouncyCastle Argon2, kotlinx-serialization-json) | Testable without Android; reusable on desktop. |
-| 2026-10-30 | **Test phones: Huawei Android 10, Motorola Android 12, Xiaomi Android 15** | minSdk 28 covers all. **No Google Play services dependencies** (the Huawei probably has none): QR via ZXing, no Firebase/ML Kit. Background uploads must cope with vendor battery killers (also upload on app open). |
-| 2026-10-30 | **Argon2 parameters calibrated per phone at vault creation** | Strongest of 64/32 MiB × t3/t2 with unlock ≤ 1 s, never below 32 MiB/t2; must still open on the slowest phone within ~3 s. Benchmark table: TBD (Task 05 step 1). |
+| 2026-10-30 | **Test phones: Huawei Android 10, Motorola Android 12, Xiaomi Android 16** (task said 15; the phone reports API 36) | minSdk 28 covers all. **No Google Play services dependencies** (the Huawei probably has none): QR via ZXing, no Firebase/ML Kit. Background uploads must cope with vendor battery killers (also upload on app open). |
+| 2026-10-30 | **Argon2 parameters calibrated per phone at vault creation** | Strongest of 64/32 MiB × t3/t2 (p=4) with unlock ≤ 1 s, never below 32 MiB/t2; must still open on the slowest phone within ~3 s. Benchmark table below. |
 | 2026-10-30 | **M2 implemented by local Claude Code** (Task 05) | It has the Android SDK and the phones for the build/test loop; the cloud session reviews. |
 | 2026-10-30 | **SSH password login re-enabled for all users, including root** | Owner's choice (PuTTY with a password). Reverses the key-only part of the 2026-10-29 hardening. Acceptable only because SSH is not port-forwarded and ufw allows it from the LAN only. Details: SERVER_CHECK.md. |
+| 2026-10-30 | **Own pure-Kotlin Argon2id with p=4 lanes** (replaces BouncyCastle's Argon2) | BouncyCastle was too slow on the phone. New `Argon2.kt`: one flat `LongArray`, no allocation in the inner loop, one thread per lane with sync at the 4 segment boundaries (RFC 9106). Byte-identical to RFC 9106 vector, BouncyCastle (p=1/2/4) and argon2-cffi. New vaults use p=4; old p=1 vaults open unchanged. BouncyCastle stays for PBKDF2 (desktop import) and as a test cross-check. Recovery slot stays HKDF (160-bit random key needs no stretching). |
+
+## Argon2 benchmark (Task 05 step 1)
+Median ms per unlock, measured as (create + unlock) / 2 over 3 runs each, in the release-like `bench` build. No out-of-memory errors at 64 MiB.
+
+| Phone | 64 MiB t3 p1 | 64 t2 p1 | 32 t3 p1 | 32 t2 p1 | **64 t3 p4** | 64 t2 p4 | 32 t3 p4 | 32 t2 p4 | Old BouncyCastle 64 t3 p1 | PBKDF2 600k (desktop import) | Chosen at creation |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Xiaomi (Android 16, API 36, 8 cores, 256 MiB heap) | 290 | 198 | 134 | 98 | **127** | 99 | 75 | 58 | 591 | 614 | 64 MiB/t3/p4 |
+| Motorola (Android 12) | TBD | | | | | | | | | | |
+| Huawei (Android 10) | TBD | | | | | | | | | | |
+
+Notes: Xiaomi numbers are AOT-compiled; without AOT they are within ~5 %. The very first run on the Xiaomi (fresh install, BouncyCastle) gave 2546 ms for 64/t3 and 2032 ms for PBKDF2; a re-run under the same conditions as above gave 591 / 614 ms, so that first run was an artifact of the freshly installed app, not representative. PC (JVM): 157 ms for create+unlock at 64/t3/p4 (was 307 ms with BouncyCastle p1).
