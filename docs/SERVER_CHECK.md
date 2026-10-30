@@ -140,6 +140,7 @@ The files were exposed for months before the logs start, so a leak before 15 Oct
   `PermitRootLogin prohibit-password`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`, `MaxAuthTries 3`, `LoginGraceTime 30`, `X11Forwarding no`.
 - Verified: `sshd -T` shows the values. New key sessions for root and `<ADMIN_USER>` work. Password logins for both are refused (`Permission denied (publickey)`).
 - SSH is **not** port-forwarded on the router (owner), and is now LAN-only at the firewall too.
+- **Changed 2026-10-30 (owner's choice): password login re-enabled for all users, including root.** See [SSH password login re-enabled](#ssh-password-login-re-enabled-2026-10-30).
 
 ### 3. Firewall (ufw): enabled
 - Default deny incoming / allow outgoing; routed traffic disabled.
@@ -175,7 +176,7 @@ The files were exposed for months before the logs start, so a leak before 15 Oct
 ### Not done (and why)
 - **Rotating the internal app's session secret and user passwords:** the owner asked for instructions only.
 - **TURN `external-ip`, restic server backup:** deferred by the owner.
-- **`PermitRootLogin no`:** root key login is kept for now (Task 02). Switch later once all admin work goes through `<ADMIN_USER>` + sudo.
+- **`PermitRootLogin no`:** root key login is kept for now (Task 02). Superseded 2026-10-30: root may log in with a password again (owner's choice, see below). Switch later once all admin work goes through `<ADMIN_USER>` + sudo.
 - **Pending package updates (3, non-security):** not in scope.
 
 ### Still open (recommended)
@@ -241,3 +242,12 @@ Extra checks:
 ### Notes
 - The mirror never deletes, so it keeps revisions that retention prunes from the data disk. It's tiny, but it grows without limit.
 - Off-site copy / restic server backup: still a separate, later task.
+
+## SSH password login re-enabled (2026-10-30)
+Owner's choice: password login (PuTTY) is allowed again for all users, **including root**. SSH is not port-forwarded on the router and ufw only allows it from `<LAN_SUBNET>`, so it is reachable from the LAN only.
+- Backup: `/etc/ssh/sshd_config.d/00-hardening.conf.bak-2026-10-30`. A standby root session and a 5-minute auto-rollback timer were kept until the new sessions were tested.
+- In `00-hardening.conf`: `PermitRootLogin yes`, `PasswordAuthentication yes`, `KbdInteractiveAuthentication yes`. The rest is unchanged (`PubkeyAuthentication yes`, `MaxAuthTries 3`, `LoginGraceTime 30`, `X11Forwarding no`).
+- `sshd -t` OK, `systemctl reload ssh`. `sshd -T` shows the new values. New key sessions for `<ADMIN_USER>` and root work, and the server now offers `publickey,password,keyboard-interactive`.
+- `passwd -S root`: `P` (root already has a password; none was set by Claude Code).
+- fail2ban `sshd` jail is still active, but `<LAN_SUBNET>` is in `ignoreip`, so LAN password guessing is not banned.
+- **If SSH is ever port-forwarded, turn password login (at least for root) off first.**

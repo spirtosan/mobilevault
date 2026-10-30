@@ -14,3 +14,7 @@
 | 2026-10-29 | **Recovery key = 160-bit, Crockford Base32 + checksum, HKDF** (not 24 words) | No word list to ship; typo detection; QR-friendly. |
 | 2026-10-29 | **Passwords NFC-normalised in PVAULT2** | Same key from different keyboards/OSes. PVAULT1 keeps raw UTF-8 (desktop compatibility). |
 | 2026-10-29 | **core-crypto is a pure Kotlin/JVM module** (BouncyCastle Argon2, kotlinx-serialization-json) | Testable without Android; reusable on desktop. |
+| 2026-10-30 | **Test phones: Huawei Android 10, Motorola Android 12, Xiaomi Android 15** | minSdk 28 covers all. **No Google Play services dependencies** (the Huawei probably has none): QR via ZXing, no Firebase/ML Kit. Background uploads must cope with vendor battery killers (also upload on app open). |
+| 2026-10-30 | **Argon2 parameters calibrated per phone at vault creation** | Strongest of 64/32 MiB × t3/t2 with unlock ≤ 1 s, never below 32 MiB/t2; must still open on the slowest phone within ~3 s. Benchmark table: TBD (Task 05 step 1). |
+| 2026-10-30 | **M2 implemented by local Claude Code** (Task 05) | It has the Android SDK and the phones for the build/test loop; the cloud session reviews. |
+| 2026-10-30 | **SSH password login re-enabled for all users, including root** | Owner's choice (PuTTY with a password). Reverses the key-only part of the 2026-10-29 hardening. Acceptable only because SSH is not port-forwarded and ufw allows it from the LAN only. Details: SERVER_CHECK.md. |

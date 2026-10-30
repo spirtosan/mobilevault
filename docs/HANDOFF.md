@@ -21,7 +21,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–04 are done; the next is 05.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–04 are done; 05 (M2) has been handed over; the next new one is 06.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
@@ -33,10 +33,13 @@ The main goal is **maximum protection against losing passwords**: strong offline
 - No Google Drive, no SFTP, SSH is LAN-only (not port-forwarded).
 
 ## 5. Next steps
-### Ask the owner first
-- Which **phone + Android version** to test on? (Android Studio is installed on the PC; its JDK 21 is at Android Studio's `jbr`, not on PATH.)
+### Test phones (answered 2026-10-30)
+Huawei Android 10 (API 29, **probably no Google services**, so no GMS/ML Kit/Firebase anywhere; use ZXing for QR), Motorola Android 12 (API 31), Xiaomi Android 15 (API 35, edge-to-edge, aggressive autostart limits). Android Studio is installed on the PC (JDK 21 in its `jbr`, not on PATH).
 
-### M2: Android app MVP (Task 05)
+### M2 has been handed to Claude Code as `docs/CLAUDE_CODE_TASK_05.md`
+Claude Code builds the app (it has the Android SDK and the phones); the cloud session reviews. Step 1 of the task is an Argon2 benchmark on all three phones; its results set the KDF parameters.
+
+### M2: Android app MVP (Task 05, scope summary)
 1. Create the `app` module (AGP, Compose, Material 3 dark theme with the desktop palette, minSdk 28) and `include(":app")`; depend on `:core-crypto`.
 2. Screens: onboarding (create / import desktop file / restore later), create vault (password + strength + optional hint via `HintPolicy`, Emergency Kit showing the recovery key once with a 3-random-character confirmation), unlock (hint after the first failure), list + search, entry add/edit/delete, settings.
 3. Storage: vault file in `filesDir`, atomic write (tmp + fsync + rename), local snapshots (last 20 + daily for 30 days).
