@@ -50,3 +50,4 @@ Huawei (Android 10) and Motorola (Android 12) not tested with the Task 06 build 
 - The cloud Claude session writes code/docs into `C:\Users\spirt\mobilevault` (no GitHub access from there). The local **Claude Code** session builds, deploys to the server and pushes to GitHub using `docs/CLAUDE_CODE_TASK_NN.md` files (01–06 done; next is 07).
 - The repo is **public**: placeholders only (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). Real values live only on the server and in chat.
 - `*.tgz` in the project folder are transfer leftovers (git-ignored) and can be deleted.
+- **2026-11-03:** owner decision: test on the Xiaomi only for now (Motorola/Huawei skipped). Task 07 (M3: backups, restore, biometrics, reminders) written: `docs/CLAUDE_CODE_TASK_07.md`.
