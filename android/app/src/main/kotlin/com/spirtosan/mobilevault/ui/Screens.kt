@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -128,6 +129,8 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         is Screen.ImportPreview -> ImportPreviewScreen(vm, snackbar, s.count)
         Screen.Export -> ExportScreen(vm, snackbar)
         Screen.About -> AboutScreen(vm, snackbar)
+        Screen.Backup -> BackupScreen(vm, snackbar)
+        is Screen.Pairing -> PairingScreen(vm, snackbar, s.purpose)
     }
 }
 
@@ -148,11 +151,11 @@ internal fun localTime(iso: String, zone: ZoneId = ZoneId.systemDefault()): Stri
     runCatching { MODIFIED_FORMAT.format(Instant.parse(iso).atZone(zone)) }.getOrDefault(iso)
 
 @Composable
-private fun ErrorText(text: String, tag: String? = null) =
+internal fun ErrorText(text: String, tag: String? = null) =
     Text(text, color = Palette.red, style = MaterialTheme.typography.bodySmall, modifier = if (tag != null) Modifier.testTag(tag) else Modifier)
 
 @Composable
-private fun WarnText(text: String, tag: String? = null) =
+internal fun WarnText(text: String, tag: String? = null) =
     Text(text, color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = if (tag != null) Modifier.testTag(tag) else Modifier)
 
 // ── onboarding & create ──────────────────────────────────────────────────────
@@ -620,7 +623,8 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             }
         }
         PanelCard(title = "Backup") {
-            Muted("Coming soon: encrypted backups to your own server.")
+            BackupSummary(vm)
+            ColorButton("Backup settings", { vm.go(Screen.Backup) }, Palette.steel, Modifier.fillMaxWidth().testTag("toBackup"), Icons.Filled.CloudUpload)
         }
         PanelCard(title = "Import / Export") {
             ColorButton("Import from desktop (merge)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload)

@@ -6,10 +6,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import com.spirtosan.mobilevault.ui.AppRoot
 import com.spirtosan.mobilevault.ui.AppViewModel
 import com.spirtosan.mobilevault.ui.MobileVaultTheme
 
+@OptIn(ExperimentalComposeUiApi::class)
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
 
@@ -21,7 +27,11 @@ class MainActivity : ComponentActivity() {
         val allowScreenshots = BuildConfig.DEBUG && intent.getBooleanExtra("debug_allow_screenshots", false)
         if (!allowScreenshots) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        setContent { MobileVaultTheme { AppRoot(vm, ::finish) } }
+        setContent {
+            // Debug builds: test tags visible to `uiautomator dump` as resource ids, for adb-driven checks.
+            val root = if (BuildConfig.DEBUG) Modifier.semantics { testTagsAsResourceId = true } else Modifier
+            MobileVaultTheme { Box(root) { AppRoot(vm, ::finish) } }
+        }
     }
 
     // Any touch or key press counts as activity for the auto-lock timer.

@@ -10,6 +10,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spirtosan.mobilevault.MobileVaultApp
+import com.spirtosan.mobilevault.backup.BackupException
+import com.spirtosan.mobilevault.backup.PairingPayload
 import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.crypto.HintPolicy
 import com.spirtosan.mobilevault.crypto.Pvault1
@@ -49,7 +51,12 @@ sealed interface Screen {
     data class ImportPreview(val count: Int) : Screen
     data object Export : Screen
     data object About : Screen
+    data object Backup : Screen
+    /** Pair with the server; [purpose] decides where the flow continues afterwards. */
+    data class Pairing(val purpose: PairPurpose) : Screen
 }
+
+enum class PairPurpose { SETTINGS, RESTORE, CREATE }
 
 /**
  * The recovery key on screen. The vault holding it is already saved and open, so a lock on the
@@ -419,6 +426,60 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             back()
             message = "Exported for the desktop app"
         } finally { password.wipe() }
+    }
+
+    // ── backup server ─────────────────────────────────────────────────────────
+    val backupConfig get() = a.backup.config
+    val backupStatus get() = a.backup.status
+    var pairingError by mutableStateOf<String?>(null)
+    /** Parsed pairing text without pins, waiting for the owner's explicit confirmation. */
+    var pairingWithoutPins by mutableStateOf<PairingPayload?>(null); private set
+    /** Result of "Test connection" and whether it failed. */
+    var connectionText by mutableStateOf<String?>(null); private set
+    var connectionError by mutableStateOf(false); private set
+
+    private fun localVaultId(): String? = if (repo.exists()) runCatching { Pvault2.peekHeader(repo.read()).vaultId }.getOrNull() else null
+
+    /** From the QR scanner or the paste field. */
+    fun submitPairing(text: String, purpose: PairPurpose) {
+        pairingError = null
+        val p = try { PairingPayload.parse(text) } catch (e: PairingPayload.Invalid) { pairingError = e.message; return }
+        if (p.pins.isEmpty()) pairingWithoutPins = p else pair(p, purpose)
+    }
+
+    fun confirmPairingWithoutPins(purpose: PairPurpose) { pairingWithoutPins?.let { pairingWithoutPins = null; pair(it, purpose) } }
+    fun cancelPairingWithoutPins() { pairingWithoutPins = null }
+
+    private fun pair(p: PairingPayload, purpose: PairPurpose) = work {
+        try {
+            val c = a.backup.pair(p)
+            connectionText = null
+            message = "Connected to ${c.host} as \"${c.device}\""
+            afterPairing(purpose)
+        } catch (e: BackupException) {
+            pairingError = e.text
+        }
+    }
+
+    private fun afterPairing(purpose: PairPurpose) {
+        when (purpose) {
+            PairPurpose.SETTINGS, PairPurpose.RESTORE, PairPurpose.CREATE -> back()
+        }
+    }
+
+    fun testConnection() = work {
+        connectionText = null
+        try {
+            connectionText = a.backup.testConnection(localVaultId()); connectionError = false
+        } catch (e: BackupException) {
+            connectionText = e.text; connectionError = true
+        }
+    }
+
+    fun disconnectBackup() {
+        a.backup.disconnect()
+        connectionText = null
+        message = "This phone is no longer connected to the backup server"
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

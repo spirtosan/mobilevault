@@ -10,6 +10,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.spirtosan.mobilevault.backup.BackupManager
+import com.spirtosan.mobilevault.backup.DeviceKeys
 import com.spirtosan.mobilevault.data.AppSettings
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultRepository
@@ -39,6 +41,7 @@ class MobileVaultApp : Application() {
     lateinit var clipboard: Clipboard private set
     lateinit var session: Session private set
     lateinit var settings: StateFlow<Settings> private set
+    lateinit var backup: BackupManager private set
 
     private var backgroundLock: Job? = null
 
@@ -49,6 +52,7 @@ class MobileVaultApp : Application() {
         clipboard = Clipboard(this, scope)
         session = Session(repo, clipboard, scope) { appSettings.deviceId() }
         settings = appSettings.settings.stateIn(scope, SharingStarted.Eagerly, Settings())
+        backup = BackupManager(filesDir, DeviceKeys(this))
 
         ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) = session.lock()

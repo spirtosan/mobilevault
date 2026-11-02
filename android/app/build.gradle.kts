@@ -71,6 +71,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+    // Backup client (Task 07). No Google Play services, Firebase or ML Kit anywhere (Huawei rule).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")   // 5.x needs compileSdk 37 + a newer AGP
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")   // QR scanner: ZXing core, own camera code
 
     // Benchmark screen only: compares against the old BouncyCastle Argon2.
     debugImplementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
