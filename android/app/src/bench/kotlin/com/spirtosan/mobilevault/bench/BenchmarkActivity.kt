@@ -98,7 +98,7 @@ class BenchmarkActivity : ComponentActivity() {
                 val t1 = SystemClock.elapsedRealtime()
                 val opened = Pvault2.unlockWithPassword(created.bytes, pw)
                 val t2 = SystemClock.elapsedRealtime()
-                opened.wipe(); created.vault.wipe(); created.recoveryKey.wipe()
+                opened.wipe(); created.vault.wipe(); created.recoveryKey?.wipe()
                 creates += t1 - t0; unlocks += t2 - t1; perUnlock += (t2 - t0) / 2
             }
             "$label  median(create+unlock)/2=${median(perUnlock)} ms  " +

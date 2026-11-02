@@ -72,6 +72,9 @@ data class VaultHeader(
 ) {
     fun slot(type: String) = slots.firstOrNull { it.type == type }
 
+    /** The recovery key is optional (owner's choice, 2026-11-02): a vault may have no `recovery` slot. */
+    val hasRecoveryKey get() = slot("recovery") != null
+
     internal fun toJsonBytes(): ByteArray = JsonObject(LinkedHashMap<String, JsonElement>().apply {
         putAll(extra)
         put("v", JsonPrimitive(2)); put("vault_id", JsonPrimitive(vaultId)); put("rev", JsonPrimitive(rev))
@@ -138,13 +141,19 @@ class UnlockedVault internal constructor(
         header = header.copy(hint = hint?.ifBlank { null }, slots = header.slots.filter { it.type != "password" } + slot)
     }
 
-    /** Replace the recovery key (e.g. if the printed kit was lost). Call [seal] afterwards. */
+    /** Replace the recovery key (e.g. if the printed kit was lost), or add one if there is none. Call [seal] afterwards. */
     fun regenerateRecoveryKey(): RecoveryKey {
         checkOpen()
         val rk = RecoveryKey.generate()
         val slot = Pvault2.recoverySlot(rk, dek, header.vaultId)
         header = header.copy(slots = header.slots.filter { it.type != "recovery" } + slot)
         return rk
+    }
+
+    /** Drop the recovery slot: from now on only the master password opens the vault. Call [seal] afterwards. */
+    fun removeRecoveryKey() {
+        checkOpen()
+        header = header.copy(slots = header.slots.filter { it.type != "recovery" })
     }
 
     /** Check a typed password without changing anything (used by the "practise your password" reminder). */
@@ -187,15 +196,20 @@ object Pvault2 {
 
     fun isPvault2(raw: ByteArray) = raw.size >= 8 && raw.copyOfRange(0, 8).contentEquals(MAGIC)
 
-    class Created(val vault: UnlockedVault, val recoveryKey: RecoveryKey, val bytes: ByteArray)
+    /** [recoveryKey] is null when the vault was created without one. */
+    class Created(val vault: UnlockedVault, val recoveryKey: RecoveryKey?, val bytes: ByteArray)
 
-    /** Create a new vault (rev 1). Show [Created.recoveryKey] once on the Emergency Kit, then wipe it. */
+    /**
+     * Create a new vault (rev 1). Show [Created.recoveryKey] once on the Emergency Kit, then wipe it.
+     * With [withRecoveryKey] = false the file has only the password slot.
+     */
     fun create(
         password: CharArray,
         deviceId: String,
         hint: String? = null,
         payload: VaultPayload = VaultPayload(),
         kdf: Argon2Params = Argon2Params(),
+        withRecoveryKey: Boolean = true,
     ): Created {
         if (hint != null) {
             val r = HintPolicy.check(hint, password)
@@ -203,10 +217,10 @@ object Pvault2 {
         }
         val id = UUID.randomUUID().toString()
         val dek = Crypto.random(Crypto.KEY_LEN)
-        val rk = RecoveryKey.generate()
+        val rk = if (withRecoveryKey) RecoveryKey.generate() else null
         val header = VaultHeader(
             vaultId = id, rev = 1, updated = nowIso(), device = deviceId, hint = hint?.ifBlank { null },
-            slots = listOf(passwordSlot(password, dek, id, kdf), recoverySlot(rk, dek, id)),
+            slots = listOfNotNull(passwordSlot(password, dek, id, kdf), rk?.let { recoverySlot(it, dek, id) }),
         )
         val bytes = encode(header, dek, payload)
         return Created(UnlockedVault(header, dek, payload), rk, bytes)
@@ -224,7 +238,7 @@ object Pvault2 {
 
     fun unlockWithRecoveryKey(raw: ByteArray, key: RecoveryKey): UnlockedVault {
         val f = split(raw)
-        val slot = f.header.slot("recovery") ?: throw VaultFormatException("no recovery slot")
+        val slot = f.header.slot("recovery") ?: throw VaultFormatException("this vault has no recovery key")
         val dek = unwrap(slot, f.header.vaultId) { recoveryKek(key, it) }
         return openBody(f, dek)
     }

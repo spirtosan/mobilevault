@@ -37,7 +37,7 @@ object KdfCalibration {
         val t0 = SystemClock.elapsedRealtime()
         val c = Pvault2.create("calibration".toCharArray(), "calibration", kdf = p)
         val ms = SystemClock.elapsedRealtime() - t0
-        c.vault.wipe(); c.recoveryKey.wipe()
+        c.vault.wipe(); c.recoveryKey?.wipe()
         ms
     }
 }

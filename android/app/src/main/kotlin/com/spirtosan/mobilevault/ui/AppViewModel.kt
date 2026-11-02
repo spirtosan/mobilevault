@@ -85,6 +85,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The Emergency Kit of the open vault was never confirmed (see [AppSettings.kitPending]). */
     var kitPending by mutableStateOf(false); private set
 
+    /** The vault has a recovery slot: from the header before unlock, from the open vault after. */
+    var hasRecoveryKey by mutableStateOf(false); private set
+
     // Create / new password
     var calibration by mutableStateOf<KdfCalibration.Choice?>(null); private set
     var kit by mutableStateOf<KitState?>(null); private set
@@ -164,21 +167,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun hintProblem(hint: String, password: CharArray): String? =
         (HintPolicy.check(hint, password) as? HintPolicy.Result.Rejected)?.reason
 
-    fun createVault(password: CharArray, hint: String, importedPayload: VaultPayload?) = work {
+    /** [withRecoveryKey] false: the user chose "Skip" on the recovery-key step. */
+    fun createVault(password: CharArray, hint: String, importedPayload: VaultPayload?, withRecoveryKey: Boolean) = work {
         val kdf = (calibration ?: withContext(Dispatchers.Default) {
             KdfCalibration.choose(KdfCalibration::measureOnDevice)
         }.also { calibration = it }).params
         val device = prefs.deviceId()
-        val created = withContext(Dispatchers.Default) {
-            Pvault2.create(password, device, hint.ifBlank { null }, importedPayload ?: VaultPayload(), kdf)
-        }
-        password.wipe()
+        val created = try {
+            withContext(Dispatchers.Default) {
+                Pvault2.create(password, device, hint.ifBlank { null }, importedPayload ?: VaultPayload(), kdf, withRecoveryKey)
+            }
+        } finally { password.wipe() }
         // Save before the key is shown: the user may save or print the Emergency Kit and then get
         // locked out of this screen (screen off, leaving the app). The key must still open the vault.
         withContext(Dispatchers.IO) { repo.save(created.bytes) }
-        prefs.setKitPending(true)
+        prefs.setKitPending(created.recoveryKey != null)
         session.open(created.vault)
-        showKit(created.recoveryKey, created.vault.vaultId, newVault = true)
+        hasRecoveryKey = created.recoveryKey != null
+        val rk = created.recoveryKey
+        if (rk != null) showKit(rk, created.vault.vaultId, newVault = true)
+        else { kitPending = false; replace(Screen.VaultList); message = "Vault created without a recovery key" }
     }
 
     private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean) {
@@ -222,6 +230,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val header = runCatching { Pvault2.peekHeader(repo.read()) }.getOrNull()
         hint = header?.hint
         vaultId = header?.vaultId
+        hasRecoveryKey = header?.hasRecoveryKey ?: false
         viewModelScope.launch {
             val (n, _) = prefs.failures()
             showHintButton = n > 0 && hint != null
@@ -272,6 +281,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val v = withContext(Dispatchers.Default) { Pvault2.unlockWithRecoveryKey(repo.read(), key) }
             prefs.clearFailures()
             prefs.setKitPending(false)                   // the user evidently has the key
+            kitPending = false
+            hasRecoveryKey = true
             session.open(v)
             replace(Screen.NewPassword(forced = true))
         } catch (e: WrongKeyException) {
@@ -281,8 +292,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun openAndShowList(v: UnlockedVault) {
+        hasRecoveryKey = v.header.hasRecoveryKey
         session.open(v)
-        kitPending = prefs.kitPending()
+        // a stale flag (e.g. from an earlier vault) never shows the card for a vault without a key
+        kitPending = hasRecoveryKey && prefs.kitPending()
         replace(Screen.VaultList)
     }
 
@@ -309,7 +322,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun regenerateRecoveryKey() = work {
         val (rk, id) = session.withVault(save = true) { it.regenerateRecoveryKey() to it.vaultId }
         prefs.setKitPending(true)
+        hasRecoveryKey = true
         showKit(rk, id, newVault = false)
+    }
+
+    /** Step 1 of "Remove recovery key": check the master password, then [onOk] shows the confirm dialog. */
+    fun checkPasswordForRemoval(password: CharArray, onOk: () -> Unit) = work {
+        try {
+            val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
+            if (ok) onOk() else message = "Master password is wrong"
+        } finally { password.wipe() }
+    }
+
+    fun removeRecoveryKey() = work {
+        session.withVault(save = true) { it.removeRecoveryKey() }
+        prefs.setKitPending(false)
+        kitPending = false
+        hasRecoveryKey = false
+        message = "Recovery key removed. Only the master password opens this vault now."
     }
 
     // ── entries ───────────────────────────────────────────────────────────────

@@ -51,7 +51,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -150,14 +154,50 @@ private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Scree
     var pw by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
     var hint by rememberSaveable { mutableStateOf("") }
+    var keyStep by rememberSaveable { mutableStateOf(false) }      // step 2: recovery key or skip
+    if (keyStep) {
+        BackHandler { keyStep = false }
+        RecoveryKeyStep(vm, snackbar, onBack = { keyStep = false }) { withKey ->
+            vm.createVault(pw.toCharArray(), hint, s.imported, withKey); pw = ""; confirm = ""
+        }
+        return
+    }
     Page("Create vault", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         s.imported?.let { Muted("${it.activeEntries.size} entries from the desktop file will be in the new vault.") }
         val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
-        Button(
-            onClick = { vm.createVault(pw.toCharArray(), hint, s.imported); pw = ""; confirm = "" },
-            enabled = ok, modifier = Modifier.fillMaxWidth().testTag("createSubmit"),
-        ) { Text("Create") }
+        Button(onClick = { keyStep = true }, enabled = ok, modifier = Modifier.fillMaxWidth().testTag("createSubmit")) {
+            Text("Next")
+        }
     }
+}
+
+/** Create flow, step 2: the recovery key is optional (owner's choice, 2026-11-02), but recommended. */
+@Composable
+private fun RecoveryKeyStep(vm: AppViewModel, snackbar: SnackbarHostState, onBack: () -> Unit, create: (withKey: Boolean) -> Unit) {
+    var confirmSkip by remember { mutableStateOf(false) }
+    Page("Recovery key", snackbar, onBack = onBack, busy = vm.busy) {
+        Text(buildAnnotatedString {
+            append("A recovery key is a 36-character code you print or write down. If you forget your master password, it is the ")
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("only") }
+            append(" way back in. Server backups won't help: they are locked with the same password.")
+        }, modifier = Modifier.testTag("recoveryChoice"))
+        Button(
+            onClick = { create(true) }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth().testTag("withKey"),
+            colors = ButtonDefaults.buttonColors(containerColor = Palette.orange, contentColor = Palette.onOrange),
+        ) { Text("Create recovery key (recommended)", fontWeight = FontWeight.Bold) }
+        TextButton(onClick = { confirmSkip = true }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth().testTag("skipKey")) {
+            Text("Skip", color = Palette.fgSecondary)
+        }
+    }
+    if (confirmSkip) AlertDialog(
+        onDismissRequest = { confirmSkip = false },
+        title = { Text("Skip the recovery key?") },
+        text = { Text("Without a recovery key, a forgotten master password means all passwords in this vault are lost. Skip anyway?") },
+        confirmButton = {
+            TextButton(onClick = { confirmSkip = false; create(false) }, Modifier.testTag("skipConfirm")) { Text("Skip anyway", color = Palette.red) }
+        },
+        dismissButton = { TextButton(onClick = { confirmSkip = false }) { Text("Back") } },
+    )
 }
 
 @Composable
@@ -211,7 +251,8 @@ private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             if (hintShown) Text("Hint: ${vm.hint}", color = Palette.orange)
             else TextButton(onClick = { hintShown = true }) { Text("Show hint") }
         }
-        TextButton(onClick = { vm.recoveryError = null; vm.go(Screen.Recovery) }, Modifier.testTag("toRecovery")) {
+        // Only when the file has a recovery slot: without one there is nothing to offer (no dead end).
+        if (vm.hasRecoveryKey) TextButton(onClick = { vm.recoveryError = null; vm.go(Screen.Recovery) }, Modifier.testTag("toRecovery")) {
             Text("Forgot password? Use recovery key")
         }
     }
@@ -304,11 +345,15 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 @Composable
 private fun KitPendingCard(vm: AppViewModel) {
     var confirm by remember { mutableStateOf(false) }
+    var remove by remember { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = Palette.bgPanel), modifier = Modifier.testTag("kitPending")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Recovery key not confirmed", color = Palette.orange, style = MaterialTheme.typography.titleSmall)
-            Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one.")
-            TextButton(onClick = { confirm = true }) { Text("Create new recovery key") }
+            Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one, or remove it.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { confirm = true }) { Text("Create new recovery key") }
+                TextButton(onClick = { remove = true }, Modifier.testTag("kitPendingRemove")) { Text("Remove recovery key", color = Palette.red) }
+            }
         }
     }
     if (confirm) AlertDialog(
@@ -317,6 +362,38 @@ private fun KitPendingCard(vm: AppViewModel) {
         text = { Text("Any key or Emergency Kit you saved for this vault stops working.") },
         confirmButton = { TextButton(onClick = { confirm = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+    )
+    if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
+}
+
+/** "Remove recovery key": master password first, then a confirmation, then the slot is dropped and saved. */
+@Composable
+private fun RemoveRecoveryKeyDialogs(vm: AppViewModel, onDone: () -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    var verified by remember { mutableStateOf(false) }
+    if (!verified) AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Remove recovery key") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Enter your master password to continue.")
+                PasswordField(pw, { pw = it }, "Master password", tag = "removePw")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.checkPasswordForRemoval(pw.toCharArray()) { verified = true }; pw = "" },
+                enabled = pw.isNotEmpty() && !vm.busy, modifier = Modifier.testTag("removePwOk")) { Text("Continue") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
+    ) else AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Remove the recovery key?") },
+        text = { Text("Without a recovery key, a forgotten master password means all passwords in this vault are lost. " +
+            "Any printed Emergency Kit stops working.") },
+        confirmButton = {
+            TextButton(onClick = { onDone(); vm.removeRecoveryKey() }, Modifier.testTag("removeConfirm")) { Text("Remove", color = Palette.red) }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
     )
 }
 
@@ -440,6 +517,7 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val s by vm.settings.collectAsState()
     var confirmRegen by remember { mutableStateOf(false) }
+    var remove by remember { mutableStateOf(false) }
     val pickImport = rememberImportPicker(vm)
     Page("Settings", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         ChoiceRow("Auto-lock after", Settings.AUTO_LOCK_CHOICES, s.autoLockMinutes, { "$it min" }) {
@@ -453,7 +531,22 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             { if (it == 0) "Never" else "$it s" }) { vm.updateSettings(s.copy(clipboardClearSeconds = it)) }
         HorizontalDivider()
         OutlinedButton(onClick = { vm.go(Screen.NewPassword(forced = false)) }, Modifier.fillMaxWidth()) { Text("Change master password") }
-        OutlinedButton(onClick = { confirmRegen = true }, Modifier.fillMaxWidth()) { Text("Regenerate recovery key") }
+        HorizontalDivider()
+        Text("Recovery key", style = MaterialTheme.typography.titleSmall)
+        if (vm.hasRecoveryKey) {
+            Muted("Opens the vault if you forget the master password.")
+            OutlinedButton(onClick = { confirmRegen = true }, Modifier.fillMaxWidth().testTag("newRecoveryKey")) { Text("New recovery key") }
+            OutlinedButton(onClick = { remove = true }, Modifier.fillMaxWidth().testTag("removeRecoveryKey")) {
+                Text("Remove recovery key", color = Palette.red)
+            }
+        } else {
+            Text("No recovery key. If you forget the master password, the vault is lost.",
+                color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("noRecoveryKey"))
+            OutlinedButton(onClick = { vm.regenerateRecoveryKey() }, Modifier.fillMaxWidth().testTag("addRecoveryKey")) {
+                Text("Create recovery key")
+            }
+        }
+        HorizontalDivider()
         OutlinedButton(onClick = pickImport, Modifier.fillMaxWidth()) { Text("Import from desktop (merge)") }
         OutlinedButton(onClick = { vm.go(Screen.Export) }, Modifier.fillMaxWidth()) { Text("Export for desktop") }
         OutlinedButton(onClick = { vm.go(Screen.About) }, Modifier.fillMaxWidth()) { Text("About") }
@@ -465,6 +558,7 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         confirmButton = { TextButton(onClick = { confirmRegen = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
         dismissButton = { TextButton(onClick = { confirmRegen = false }) { Text("Cancel") } },
     )
+    if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
 }
 
 @Composable

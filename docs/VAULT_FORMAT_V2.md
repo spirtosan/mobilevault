@@ -9,6 +9,7 @@ Goals: a recoverable master password (recovery key), an authenticated header, en
   - `recovery` slot: KEK = HKDF-SHA256(recovery key, salt, info "PVAULT2 recovery"). The recovery key is **160 random bits**, shown once on a printable **Emergency Kit** as 32 Crockford-Base32 characters + a 4-character checksum, in 9 groups (`XXXX-XXXX-…`, 44 characters; O/I/L are read as 0/1/1). A slow KDF isn't needed because the key is fully random.
   - `biometric` slot: this one is **not stored in the file**. It's stored locally, with the DEK wrapped by an Android Keystore key that requires `BiometricPrompt` (StrongBox if available).
 - Changing the password only rewrites the password slot. Losing the password means unlocking with the recovery key and setting a new password.
+- The `recovery` slot is **optional** (owner's choice, 2026-11-02). A vault created with "Skip" has only the `password` slot; one can be added or removed later (Settings → Recovery key). Readers look slots up by `type` and must not assume a recovery slot exists. Without it, a forgotten password cannot be recovered by anyone.
 
 ## Binary layout
 ```

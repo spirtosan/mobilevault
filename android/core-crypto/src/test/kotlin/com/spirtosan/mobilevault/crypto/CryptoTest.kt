@@ -100,7 +100,7 @@ class CryptoTest {
     @Test
     fun pvault2_recoveryKeyUnlocks_andSurvivesPasswordChange() {
         val c = Pvault2.create("old".toCharArray(), "d", payload = sampleEntries(), kdf = FAST)
-        val rkText = c.recoveryKey.display()
+        val rkText = c.recoveryKey!!.display()
         val v = c.vault
         v.changePassword("new password".toCharArray(), hint = null, kdf = FAST)
         val raw2 = v.seal("d")
@@ -114,7 +114,7 @@ class CryptoTest {
     @Test
     fun pvault2_forgottenPasswordFlow_recoveryThenNewPassword() {
         val c = Pvault2.create("forgotten".toCharArray(), "d", kdf = FAST)
-        val v = Pvault2.unlockWithRecoveryKey(c.bytes, RecoveryKey.parse(c.recoveryKey.display()))
+        val v = Pvault2.unlockWithRecoveryKey(c.bytes, RecoveryKey.parse(c.recoveryKey!!.display()))
         v.changePassword("brand new".toCharArray(), "hint", FAST)
         val raw = v.seal("d")
         assertEquals(c.vault.vaultId, Pvault2.unlockWithPassword(raw, "brand new".toCharArray()).vaultId)
@@ -124,7 +124,7 @@ class CryptoTest {
     @Test
     fun pvault2_recoveryKeyInputVariantsUnlock() {
         val c = Pvault2.create("pw".toCharArray(), "d", payload = sampleEntries(), kdf = FAST)
-        val d = c.recoveryKey.display()
+        val d = c.recoveryKey!!.display()
         val g = d.split("-")
         val variants = listOf(
             d,
@@ -147,18 +147,66 @@ class CryptoTest {
         assertEquals("A recovery key has 36 characters (got 35)", e.message)
     }
 
+    // ── optional recovery key ─────────────────────────────────────────────────
+    @Test
+    fun pvault2_withoutRecoveryKey_opensWithPassword() {
+        val c = Pvault2.create("pw".toCharArray(), "d", payload = sampleEntries(), kdf = FAST, withRecoveryKey = false)
+        assertNull(c.recoveryKey)
+        val h = Pvault2.peekHeader(c.bytes)
+        assertFalse(h.hasRecoveryKey)
+        assertEquals(listOf("password"), h.slots.map { it.type })
+        val v = Pvault2.unlockWithPassword(c.bytes, "pw".toCharArray())
+        assertEquals(2, v.payload.entries.size)
+        // still opens after a password change and a re-seal
+        v.changePassword("pw2".toCharArray(), null, FAST)
+        assertEquals(2, Pvault2.unlockWithPassword(v.seal("d"), "pw2".toCharArray()).payload.entries.size)
+        // export to the desktop format does not need a recovery slot
+        val desktop = Pvault1.encrypt("export pw".toCharArray(), v.payload)
+        assertEquals(2, Pvault1.decrypt("export pw".toCharArray(), desktop).entries.size)
+    }
+
+    @Test
+    fun pvault2_withoutRecoveryKey_recoveryUnlockGivesClearError() {
+        val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST, withRecoveryKey = false)
+        val someKey = RecoveryKey.parse(RecoveryKey.generate().display())
+        val e = assertThrows(VaultFormatException::class.java) { Pvault2.unlockWithRecoveryKey(c.bytes, someKey) }
+        assertEquals("this vault has no recovery key", e.message)
+    }
+
+    @Test
+    fun pvault2_addThenRemoveRecoveryKey() {
+        val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST, withRecoveryKey = false)
+        val v = c.vault
+        val added = v.regenerateRecoveryKey().display()             // "add recovery key"
+        val raw1 = v.seal("d")
+        assertTrue(Pvault2.peekHeader(raw1).hasRecoveryKey)
+        assertEquals(v.vaultId, Pvault2.unlockWithRecoveryKey(raw1, RecoveryKey.parse(added)).vaultId)
+
+        v.removeRecoveryKey()
+        val raw2 = v.seal("d")
+        assertFalse(Pvault2.peekHeader(raw2).hasRecoveryKey)
+        assertThrows(VaultFormatException::class.java) { Pvault2.unlockWithRecoveryKey(raw2, RecoveryKey.parse(added)) }
+        Pvault2.unlockWithPassword(raw2, "pw".toCharArray())
+
+        // removing from a default vault works the same way; a second remove is a no-op
+        val d = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
+        assertTrue(Pvault2.peekHeader(d.bytes).hasRecoveryKey)
+        d.vault.removeRecoveryKey(); d.vault.removeRecoveryKey()
+        assertEquals(listOf("password"), Pvault2.peekHeader(d.vault.seal("d")).slots.map { it.type })
+    }
+
     /** A valid key for another vault (e.g. a kit saved for a vault that was then re-created) is rejected cleanly. */
     @Test
     fun pvault2_recoveryKeyOfOtherVaultRejected() {
         val a = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
         val b = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
-        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(b.bytes, RecoveryKey.parse(a.recoveryKey.display())) }
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(b.bytes, RecoveryKey.parse(a.recoveryKey!!.display())) }
     }
 
     @Test
     fun pvault2_regenerateRecoveryKeyInvalidatesOld() {
         val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
-        val old = c.recoveryKey.display()
+        val old = c.recoveryKey!!.display()
         val newKey = c.vault.regenerateRecoveryKey().display()
         val raw = c.vault.seal("d")
         assertNotEquals(old, newKey)

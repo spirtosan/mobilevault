@@ -8,7 +8,7 @@ Main principle: **zero-knowledge.** Only the already-encrypted vault file ever l
 | 1 | Atomic save (write tmp, fsync, rename) | crash or battery dying mid-write |
 | 2 | Local snapshot history in app-private storage: last 20 saves + 1 per day for 30 days | accidental deletion, bad edits |
 | 3 | **Remote backup** to 1 or more destinations, versioned | phone lost, stolen, broken or reset |
-| 4 | Recovery key / Emergency Kit (paper) | forgotten master password |
+| 4 | Recovery key / Emergency Kit (paper), **optional** | forgotten master password (only if the vault has one) |
 | 5 | Manual export (encrypted file, share sheet) | everything else, user-controlled |
 
 ## Remote destinations (pluggable `BackupTarget` interface)
@@ -74,4 +74,8 @@ The `BackupTarget` interface stays pluggable, so another server or a USB/SD copy
 - Phase 2: automatic merge per entry `id`: newer `modified` wins, and tombstones are respected. Conflicting edits keep both versions.
 
 ## Emergency Kit (PDF generated on device, shown at vault creation)
-Contains the vault ID, the recovery key (24 words + QR code), the configured backup locations (without passwords), and short restore instructions. The user is asked to print it or store it offline, and must confirm 3 random words before continuing.
+Contains the vault ID, the recovery key (9 groups of 4 characters, see VAULT_FORMAT_V2.md) and short restore instructions. The user is asked to print it or store it offline, and must re-type 3 random groups before continuing.
+
+- The recovery key is **optional** (2026-11-02). Create flow: after the password, "Create recovery key (recommended)" or "Skip" with a confirmation. Server backups do not replace it: they are encrypted with the same password.
+- The vault (or the new recovery slot) is saved **before** the key is shown, so a kit that was saved or printed always matches the file even if the app locks on the kit screen. An unconfirmed kit shows a reminder in the vault list (create a new key, or remove it).
+- Settings → Recovery key: create one (if none), replace it, or remove it (master password + confirmation).

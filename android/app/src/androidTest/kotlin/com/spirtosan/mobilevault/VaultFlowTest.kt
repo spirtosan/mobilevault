@@ -2,11 +2,15 @@ package com.spirtosan.mobilevault
 
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -32,8 +36,23 @@ class VaultFlowTest {
 
     private fun tag(t: String): SemanticsNodeInteraction = rule.onNodeWithTag(t, useUnmergedTree = true)
 
-    private fun waitFor(t: String, enabled: Boolean = false, ms: Long = 20_000) =
-        rule.waitUntilAtLeastOneExists(if (enabled) hasTestTag(t) and isEnabled() else hasTestTag(t), ms)
+    /** On timeout the failure shows what was on screen instead (texts and tags). */
+    private fun waitFor(t: String, enabled: Boolean = false, ms: Long = 20_000) {
+        try {
+            rule.waitUntilAtLeastOneExists(if (enabled) hasTestTag(t) and isEnabled() else hasTestTag(t), ms)
+        } catch (e: ComposeTimeoutException) {
+            val screen = rule.onAllNodes(isRoot()).fetchSemanticsNodes().joinToString("\n---\n") { root ->
+                rule.onAllNodes(hasAnyAncestor(isRoot()) or isRoot(), useUnmergedTree = true).fetchSemanticsNodes()
+                    .filter { it.root == root.root }
+                    .mapNotNull { n ->
+                        val texts = n.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text }
+                        val tag = n.config.getOrNull(SemanticsProperties.TestTag)
+                        if (texts == null && tag == null) null else "[$tag] $texts"
+                    }.joinToString("\n")
+            }
+            throw AssertionError("'$t' not found${if (enabled) " (enabled)" else ""}. Screen:\n$screen", e)
+        }
+    }
 
     private val newPw = "Brand-new-master-password-7"
 
@@ -60,16 +79,23 @@ class VaultFlowTest {
         rule.waitForIdle()
     }
 
-    /** Onboarding → Create → Emergency Kit. Returns the recovery key as shown (3 lines of 3 groups). */
-    private fun createUntilKit(): String {
+    /** Onboarding → Create → password → recovery-key step. */
+    private fun createUntilKeyStep() {
         waitFor("create")
         tag("create").performClick()
         tag("pw").performTextInput(pw)
         tag("pw2").performTextInput(pw)
         waitFor("createSubmit", enabled = true)
         tag("createSubmit").performScrollTo().performClick()
+        waitFor("withKey")
+    }
+
+    /** … → "Create recovery key" → Emergency Kit. Returns the recovery key as shown (3 lines of 3 groups). */
+    private fun createUntilKit(): String {
+        createUntilKeyStep()
+        tag("withKey").performClick()
         waitFor("recoveryKey")
-        return tag("recoveryKey").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+        return shownKey()
     }
 
     private fun confirmKit(key: String) {
@@ -194,6 +220,92 @@ class VaultFlowTest {
             tag("recoveryInput").performTextInput(key.replace("\n", " "))
             tag("recoveryUnlock").performClick()
             waitFor("newPwSave")
+        }
+    }
+
+    // ── optional recovery key (Part B) ───────────────────────────────────────
+    private fun openSettings() {
+        rule.onNodeWithContentDescription("Settings").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("removeRecoveryKey") or hasTestTag("addRecoveryKey"), 10_000)
+    }
+
+    private fun shownKey() = tag("recoveryKey").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+
+    private fun gone(t: String) = rule.onNodeWithTag(t, useUnmergedTree = true).assertDoesNotExist()
+
+    /** "Skip": no recovery link, no reminder card (even with a stale flag), the Settings line; adding a key later works. */
+    @Test
+    fun skipRecoveryKeyThenAddLater() {
+        resetVault()
+        runBlocking { app.appSettings.setKitPending(true) }       // stale flag from an earlier vault
+        ActivityScenario.launch(MainActivity::class.java).use {
+            createUntilKeyStep()
+            tag("skipKey").performClick()
+            waitFor("skipConfirm")
+            tag("skipConfirm").performClick()
+            waitFor("add")
+            gone("kitPending")
+
+            tag("lock").performClick()
+            waitFor("unlockPw")
+            gone("toRecovery")
+            unlock()
+            gone("kitPending")
+
+            openSettings()
+            waitFor("noRecoveryKey")
+            tag("addRecoveryKey").performScrollTo().performClick()
+            waitFor("recoveryKey")
+            confirmKit(shownKey())
+            tag("lock").performClick()
+            waitFor("toRecovery")
+        }
+    }
+
+    /** The reminder card offers "Remove recovery key" with the master-password check. */
+    @Test
+    fun removeRecoveryKeyFromReminderCard() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            createUntilKit()
+            lockFromOutside()
+            unlock()
+            waitFor("kitPendingRemove")
+            tag("kitPendingRemove").performClick()
+            waitFor("removePw")
+            tag("removePw").performTextInput("not the password")
+            tag("removePwOk").performClick()
+            rule.waitForIdle()
+            gone("removeConfirm")                                    // wrong password: no confirm step
+            tag("removePw").performTextInput(pw)
+            waitFor("removePwOk", enabled = true)                    // the first check (Argon2) may still run
+            tag("removePwOk").performClick()
+            waitFor("removeConfirm")
+            tag("removeConfirm").performClick()
+            rule.waitUntil(20_000) { rule.onAllNodes(hasTestTag("kitPending"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+
+            tag("lock").performClick()
+            waitFor("unlockPw")
+            gone("toRecovery")
+            unlock()
+            gone("kitPending")
+        }
+    }
+
+    /** Settings → Recovery key → Remove. */
+    @Test
+    fun removeRecoveryKeyInSettings() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            confirmKit(createUntilKit())
+            openSettings()
+            tag("removeRecoveryKey").performScrollTo().performClick()
+            waitFor("removePw")
+            tag("removePw").performTextInput(pw)
+            tag("removePwOk").performClick()
+            waitFor("removeConfirm")
+            tag("removeConfirm").performClick()
+            waitFor("noRecoveryKey")
         }
     }
 }

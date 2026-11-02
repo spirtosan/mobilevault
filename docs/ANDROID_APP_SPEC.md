@@ -26,7 +26,7 @@
 
 ## New for mobile
 - [ ] Biometric unlock (fingerprint/face) as a convenience; the master password is still required after reboot, every 7 days, and after 5 failed biometric attempts
-- [ ] Recovery key + Emergency Kit (see BACKUP_AND_RECOVERY.md)
+- [ ] Recovery key + Emergency Kit, optional (see BACKUP_AND_RECOVERY.md)
 - [ ] Master password reminder: hint + periodic confirmation (see below)
 - [ ] Remote backups to own Ubuntu server via HTTPS backup API (see BACKUP_AND_RECOVERY.md); optional SAF/USB copy; version history; restore; test restore; backup health indicator
 - [ ] Local snapshot history
@@ -58,11 +58,11 @@ Forgetting the master password is the most likely way to lose everything, especi
 
 ## Screens
 1. Onboarding: Create new vault / Import desktop file / Restore from backup
-2. Create vault: master password + strength meter, then the recovery key / Emergency Kit, then set up a backup target (strongly recommended, can be skipped with a warning)
-3. Unlock: password field, biometric button
+2. Create vault: master password + strength meter, then the recovery-key step ("Create recovery key (recommended)" → Emergency Kit, or "Skip" with a confirmation), then set up a backup target (strongly recommended, can be skipped with a warning)
+3. Unlock: password field, biometric button; "Forgot password? Use recovery key" only when the vault has a recovery slot
 4. Vault list: search bar, entries, FAB "+", backup status chip
 5. Entry detail / edit (same fields as desktop + notes), generator button
-6. Settings: security (auto-lock, clipboard, biometrics, change password, regenerate recovery key), backups (targets, history, restore, test restore), import/export, about
+6. Settings: security (auto-lock, clipboard, biometrics, change password), recovery key (create / new / remove; without one a permanent "No recovery key" warning), backups (targets, history, restore, test restore), import/export, about
 
 ## Suggested module layout
 ```

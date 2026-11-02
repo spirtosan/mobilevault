@@ -21,6 +21,8 @@ object Palette {
     val fgSecondary = Color(0xFFA0A0A0)
     val fgMuted = Color(0xFF606060)
     val orange = Color(0xFFF39C12)
+    /** Text on orange (main action) buttons, as on the desktop. */
+    val onOrange = Color(0xFF1A1A1A)
     val blue = Color(0xFF2980B9)
     val red = Color(0xFFE74C3C)
     val selectBg = Color(0xFF1F6AA5)
