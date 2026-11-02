@@ -233,6 +233,14 @@ class CryptoTest {
     }
 
     @Test
+    fun pvault2_sealAtLeastJumpsAboveRemoteRevisions() {
+        val v = Pvault2.create("pw".toCharArray(), "d", kdf = FAST).vault
+        assertEquals(10L, Pvault2.peekHeader(v.seal("d", atLeast = 10)).rev)
+        assertEquals(11L, Pvault2.peekHeader(v.seal("d", atLeast = 5)).rev)     // never goes back
+        assertEquals(12L, Pvault2.unlockWithPassword(v.seal("d"), "pw".toCharArray()).rev)     // header is authenticated
+    }
+
+    @Test
     fun pvault2_headerTamperingDetected() {
         val c = Pvault2.create("pw".toCharArray(), "d", hint = "a hint", kdf = FAST)
         val raw = c.bytes

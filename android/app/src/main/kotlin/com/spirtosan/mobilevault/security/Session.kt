@@ -32,6 +32,10 @@ class Session(
     /** Decrypted entries while unlocked, null when locked. */
     val payload: StateFlow<VaultPayload?> = _payload
 
+    private val _rev = MutableStateFlow(0L)
+    /** Revision of the open vault (0 when locked). */
+    val rev: StateFlow<Long> = _rev
+
     private val _lockEvents = MutableSharedFlow<Boolean>(extraBufferCapacity = 4)
     /**
      * Fires on every lock (idle, background, screen off, manual), even when no vault was open.
@@ -53,6 +57,7 @@ class Session(
         vault?.wipe()
         vault = v
         _payload.value = v.payload
+        _rev.value = v.rev
         touch()
     }
 
@@ -60,6 +65,7 @@ class Session(
     fun lock() {
         val wasOpen = _payload.value != null
         _payload.value = null
+        _rev.value = 0
         clipboard.clear()
         _lockEvents.tryEmit(wasOpen)
         scope.launch { mutex.withLock { vault?.wipe(); vault = null } }
@@ -87,8 +93,29 @@ class Session(
         r
     }
 
-    private suspend fun persist(v: UnlockedVault) {
+    /**
+     * Save the open vault again with rev ≥ [atLeast], optionally with another payload (restore of an
+     * older version). Used when the backup server already has a different file for our rev.
+     */
+    suspend fun reseal(atLeast: Long, newPayload: VaultPayload? = null) = mutex.withLock {
+        val v = vault ?: throw IllegalStateException("vault is locked")
+        val before = v.payload
+        if (newPayload != null) v.payload = newPayload
+        try {
+            persist(v, atLeast)
+        } catch (e: Exception) {
+            v.payload = before
+            throw e
+        }
+        _payload.value = v.payload
+    }
+
+    /** Run [block] with the open vault without saving (backup checks with the in-memory DEK). */
+    suspend fun <T> read(block: (UnlockedVault) -> T): T? = mutex.withLock { vault?.let(block) }
+
+    private suspend fun persist(v: UnlockedVault, atLeast: Long = 0) {
         val id = deviceId()
-        withContext(Dispatchers.IO) { repo.save(v.seal(id)) }
+        withContext(Dispatchers.IO) { repo.save(v.seal(id, atLeast)) }
+        _rev.value = v.rev
     }
 }

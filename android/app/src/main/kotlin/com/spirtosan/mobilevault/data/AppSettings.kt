@@ -19,6 +19,8 @@ data class Settings(
     val autoLockMinutes: Int = 5,
     val backgroundGraceSeconds: Int = 0,
     val clipboardClearSeconds: Int = 30,    // 0 = never
+    /** Upload backups only on unmetered networks (Wi-Fi). */
+    val backupWifiOnly: Boolean = false,
 ) {
     companion object {
         val AUTO_LOCK_CHOICES = listOf(1, 2, 5, 10, 30)
@@ -36,6 +38,7 @@ class AppSettings(private val context: Context) {
         val failCount = intPreferencesKey("unlock_fail_count")
         val failAt = longPreferencesKey("unlock_fail_at")
         val kitPending = booleanPreferencesKey("kit_pending")
+        val wifiOnly = booleanPreferencesKey("backup_wifi_only")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -43,6 +46,7 @@ class AppSettings(private val context: Context) {
             autoLockMinutes = p[K.autoLock] ?: 5,
             backgroundGraceSeconds = p[K.grace] ?: 0,
             clipboardClearSeconds = p[K.clipboard] ?: 30,
+            backupWifiOnly = p[K.wifiOnly] ?: false,
         )
     }
 
@@ -51,6 +55,7 @@ class AppSettings(private val context: Context) {
     suspend fun update(s: Settings) {
         context.store.edit {
             it[K.autoLock] = s.autoLockMinutes; it[K.grace] = s.backgroundGraceSeconds; it[K.clipboard] = s.clipboardClearSeconds
+            it[K.wifiOnly] = s.backupWifiOnly
         }
     }
 

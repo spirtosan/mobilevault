@@ -121,12 +121,13 @@ class UnlockedVault internal constructor(
     val rev get() = header.rev
 
     /**
-     * Produce the next revision of the file: rev+1, new body nonce, header as AAD.
+     * Produce the next revision of the file: rev+1 (or [atLeast] if that is higher, e.g. when the
+     * backup server already has newer revisions), new body nonce, header as AAD.
      * The result should be written atomically and uploaded as-is.
      */
-    fun seal(deviceId: String): ByteArray {
+    fun seal(deviceId: String, atLeast: Long = 0): ByteArray {
         checkOpen()
-        header = header.copy(rev = header.rev + 1, updated = nowIso(), device = deviceId)
+        header = header.copy(rev = maxOf(header.rev + 1, atLeast), updated = nowIso(), device = deviceId)
         return Pvault2.encode(header, dek, payload)
     }
 

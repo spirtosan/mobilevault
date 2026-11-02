@@ -298,6 +298,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             kitPending = false
             hasRecoveryKey = true
             session.open(v)
+            afterUnlock()
             replace(Screen.NewPassword(forced = true))
         } catch (e: WrongKeyException) {
             recoveryError = "This recovery key does not open this vault. Check that the Vault ID on your " +
@@ -311,6 +312,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // a stale flag (e.g. from an earlier vault) never shows the card for a vault without a key
         kitPending = hasRecoveryKey && prefs.kitPending()
         replace(Screen.VaultList)
+        afterUnlock()
+    }
+
+    /** Retry a pending upload, and fix a revision clash with the server while the vault is open. */
+    private fun afterUnlock() {
+        a.queueBackup()
+        a.scope.launch { runCatching { a.resolveNewRevision() } }
     }
 
     // ── password & recovery key changes ───────────────────────────────────────
@@ -431,6 +439,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── backup server ─────────────────────────────────────────────────────────
     val backupConfig get() = a.backup.config
     val backupStatus get() = a.backup.status
+    val vaultRev get() = session.rev
+
+    fun backupNow() {
+        a.queueBackup()
+        message = "Backup queued. It runs as soon as there is a connection."
+    }
     var pairingError by mutableStateOf<String?>(null)
     /** Parsed pairing text without pins, waiting for the owner's explicit confirmation. */
     var pairingWithoutPins by mutableStateOf<PairingPayload?>(null); private set

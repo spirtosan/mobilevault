@@ -19,6 +19,9 @@ class VaultRepository(dir: File, private val clock: () -> Instant = Instant::now
     private val tmpFile = File(dir, "vault.pvault.tmp")
     val snapshotDir = File(dir, "snapshots")
 
+    /** Called after every successful save (the backup upload is queued from here). */
+    @Volatile var onSaved: (() -> Unit)? = null
+
     fun exists() = vaultFile.isFile
 
     fun read(): ByteArray = vaultFile.readBytes()
@@ -35,6 +38,7 @@ class VaultRepository(dir: File, private val clock: () -> Instant = Instant::now
         }
         Files.move(tmpFile.toPath(), vaultFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         pruneSnapshots()
+        onSaved?.invoke()
     }
 
     fun snapshots(): List<Snapshot> = snapshotDir.listFiles().orEmpty().mapNotNull { Snapshot.parse(it) }

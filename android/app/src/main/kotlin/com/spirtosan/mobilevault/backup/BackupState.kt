@@ -46,6 +46,7 @@ data class BackupStatus(
     val lastSuccessAt: Long = 0,
     /** Highest rev known to be on the server (uploaded and verified, or found there with our sha256). */
     val lastSuccessRev: Long = 0,
+    val lastSuccessSha: String = "",
     /** Last failure shown to the owner; cleared by the next success. */
     val lastError: String? = null,
     /** A permanent failure (no automatic retry until something changes): too large, refused file, pins, TLS. */
@@ -60,6 +61,7 @@ data class BackupStatus(
 ) {
     fun toJson() = JsonObject(buildMap {
         put("last_success_at", JsonPrimitive(lastSuccessAt)); put("last_success_rev", JsonPrimitive(lastSuccessRev))
+        put("last_success_sha", JsonPrimitive(lastSuccessSha))
         lastError?.let { put("last_error", JsonPrimitive(it)) }
         put("stopped", JsonPrimitive(stopped)); put("disconnected", JsonPrimitive(disconnected))
         put("needs_new_rev", JsonPrimitive(needsNewRev)); put("test_restore_at", JsonPrimitive(testRestoreAt))
@@ -69,6 +71,7 @@ data class BackupStatus(
     companion object {
         fun fromJson(o: JsonObject) = BackupStatus(
             lastSuccessAt = o.long("last_success_at"), lastSuccessRev = o.long("last_success_rev"),
+            lastSuccessSha = o.str("last_success_sha") ?: "",
             lastError = o.str("last_error"), stopped = o.bool("stopped"), disconnected = o.bool("disconnected"),
             needsNewRev = o.bool("needs_new_rev"), testRestoreAt = o.long("test_restore_at"), testRestoreText = o.str("test_restore_text"),
         )

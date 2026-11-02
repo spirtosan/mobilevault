@@ -10,7 +10,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.spirtosan.mobilevault.backup.BackupException
 import com.spirtosan.mobilevault.backup.BackupManager
+import com.spirtosan.mobilevault.backup.UploadWorker
 import com.spirtosan.mobilevault.backup.DeviceKeys
 import com.spirtosan.mobilevault.data.AppSettings
 import com.spirtosan.mobilevault.data.Settings
@@ -27,6 +29,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * App-wide objects and the lock rules:
@@ -53,6 +57,7 @@ class MobileVaultApp : Application() {
         session = Session(repo, clipboard, scope) { appSettings.deviceId() }
         settings = appSettings.settings.stateIn(scope, SharingStarted.Eagerly, Settings())
         backup = BackupManager(filesDir, DeviceKeys(this))
+        repo.onSaved = { queueBackup() }
 
         ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) = session.lock()
@@ -70,8 +75,11 @@ class MobileVaultApp : Application() {
 
             override fun onStart(owner: LifecycleOwner) {
                 backgroundLock?.cancel()
+                queueBackup()          // app start / app opened: retry, HyperOS may have delayed the job
             }
         })
+
+        scope.launch { backup.status.collect { if (it.needsNewRev) resolveNewRevision() } }
 
         scope.launch {
             while (isActive) {
@@ -82,5 +90,26 @@ class MobileVaultApp : Application() {
                 }
             }
         }
+    }
+
+    /** Queue an upload of the current vault file (if paired). Safe to call often: one job chain only. */
+    fun queueBackup() {
+        if (backup.isPaired && repo.exists()) UploadWorker.enqueue(this, settings.value.backupWifiOnly)
+    }
+
+    private val resolving = Mutex()
+
+    /**
+     * The server has a different file for our rev (restore of an older version, another device):
+     * while the vault is open, save it again as `max(local, remote latest) + 1` and upload that.
+     * Called on unlock and whenever the flag is set. Never overwrites anything on the server.
+     */
+    suspend fun resolveNewRevision() = resolving.withLock {
+        if (!backup.status.value.needsNewRev || !session.isUnlocked) return@withLock
+        val t = backup.target() ?: return@withLock
+        val vaultId = session.read { it.vaultId } ?: return@withLock
+        val remote = try { t.latest(vaultId)?.rev ?: 0L } catch (e: BackupException) { return@withLock }
+        session.reseal(maxOf(session.rev.value, remote) + 1)
+        backup.updateStatus { it.copy(needsNewRev = false, lastError = null) }
     }
 }

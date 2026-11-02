@@ -389,6 +389,7 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     ) {
         PlainField(query, { query = it }, "Search service, username or URL", tag = "search", leading = Icons.Filled.Search)
         ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
+        BackupChip(vm)
         if (vm.kitPending) KitPendingCard(vm)
         if (entries.isEmpty()) Muted(if (query.isEmpty()) "No entries yet. Tap + to add one." else "Nothing found.")
         LazyColumn(Modifier.background(Palette.bgPanel, RoundedCornerShape(12.dp))) {
