@@ -39,6 +39,7 @@ class AppSettings(private val context: Context) {
         val failAt = longPreferencesKey("unlock_fail_at")
         val kitPending = booleanPreferencesKey("kit_pending")
         val wifiOnly = booleanPreferencesKey("backup_wifi_only")
+        val testRestoreDismissed = longPreferencesKey("test_restore_dismissed_at")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -87,4 +88,9 @@ class AppSettings(private val context: Context) {
     suspend fun setKitPending(pending: Boolean) {
         context.store.edit { if (pending) it[K.kitPending] = true else it.remove(K.kitPending) }
     }
+
+    /** "Test your backup" card dismissed at (wall-clock ms): it comes back 30 days later. */
+    val testRestoreDismissedAt: Flow<Long> = context.store.data.map { it[K.testRestoreDismissed] ?: 0L }
+
+    suspend fun setTestRestoreDismissed(ms: Long) { context.store.edit { it[K.testRestoreDismissed] = ms } }
 }

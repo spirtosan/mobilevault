@@ -80,6 +80,7 @@ class VaultFlowTest {
         ctx.filesDir.resolve("vault.pvault").delete()
         ctx.filesDir.resolve("snapshots").deleteRecursively()
         app.session.lock()
+        app.backup.disconnect()                                   // never upload test vaults; shows the create step 3
         runBlocking { app.appSettings.setKitPending(false); app.appSettings.clearFailures() }
     }
 
@@ -108,7 +109,16 @@ class VaultFlowTest {
         return shownKey()
     }
 
-    private fun confirmKit(key: String) {
+    /** Create flow, step 3 (backup server): "Skip" + confirm. The test app is never paired (see [resetVault]). */
+    private fun skipBackupStep() {
+        waitFor("backupStepSkip")
+        tag("backupStepSkip").performClick()
+        waitFor("backupSkipConfirm")
+        tag("backupSkipConfirm").performClick()
+        waitFor("add")
+    }
+
+    private fun confirmKit(key: String, newVault: Boolean = true) {
         val groups = key.split("\n", "-").map { it.trim() }
         assertEquals(9, groups.size)
         var typed = 0
@@ -118,7 +128,7 @@ class VaultFlowTest {
         }
         assertEquals(3, typed)
         tag("kitDone").performScrollTo().performClick()
-        waitFor("add")
+        if (newVault) skipBackupStep() else waitFor("add")
     }
 
     private fun fieldText(t: String) =
@@ -253,8 +263,10 @@ class VaultFlowTest {
             tag("skipKey").performClick()
             waitFor("skipConfirm")
             tag("skipConfirm").performClick()
-            waitFor("add")
+            skipBackupStep()
             gone("kitPending")
+            // no backup server: the red chip on the list
+            assertEquals("No backup set up", tag("backupChipText").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString { it.text })
 
             tag("lock").performClick()
             waitFor("unlockPw")
@@ -266,7 +278,7 @@ class VaultFlowTest {
             waitFor("noRecoveryKey")
             tag("addRecoveryKey").performScrollTo().performClick()
             waitFor("recoveryKey")
-            confirmKit(shownKey())
+            confirmKit(shownKey(), newVault = false)
             tag("lock").performClick()
             waitFor("toRecovery")
         }

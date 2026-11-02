@@ -3,7 +3,10 @@ package com.spirtosan.mobilevault.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -24,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,12 +44,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.spirtosan.mobilevault.backup.BackupErrors
 import com.spirtosan.mobilevault.backup.BackupHealth
+import com.spirtosan.mobilevault.backup.RemoteRev
+import com.spirtosan.mobilevault.backup.TestRestoreReminder
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
@@ -105,6 +117,12 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             st.lastError?.let { if (st.stopped || st.disconnected) ErrorText(it, "lastError") else WarnText(it, "lastError") }
             ColorButton("Back up now", { vm.backupNow() }, Palette.green, Modifier.fillMaxWidth().testTag("backupNow"),
                 Icons.Filled.CloudUpload, enabled = !st.disconnected)
+            ColorButton("Version history", { vm.openHistory() }, Palette.violet, Modifier.fillMaxWidth().testTag("history"),
+                Icons.Filled.History, enabled = !st.disconnected && !vm.busy)
+            ColorButton("Test restore", { vm.testRestore() }, Palette.blue, Modifier.fillMaxWidth().testTag("testRestore"),
+                Icons.Filled.Verified, enabled = !st.disconnected && !vm.busy)
+            if (st.testRestoreAt > 0) Text("Last test restore ${localTimeMs(st.testRestoreAt)}: ${st.testRestoreText ?: ""}",
+                color = Palette.green, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("testRestoreResult"))
             val s by vm.settings.collectAsState()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(s.backupWifiOnly, { vm.updateSettings(s.copy(backupWifiOnly = it)) }, Modifier.testTag("wifiOnly"),
@@ -191,5 +209,150 @@ internal fun BackupChip(vm: AppViewModel) {
             if (chip.unsynced) Text("Changes not backed up yet", color = Palette.fgSecondary, style = MaterialTheme.typography.bodySmall)
         }
         Icon(Icons.Filled.CloudUpload, null, tint = Palette.fgSecondary, modifier = Modifier.size(18.dp))
+    }
+}
+
+// ── restore, version history, test restore ────────────────────────────────────
+
+/** Create flow, step 3 of 3: connect the new vault to the backup server, or skip. */
+@Composable
+internal fun BackupStepScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    var confirmSkip by remember { mutableStateOf(false) }
+    Page("Create vault", snackbar, busy = vm.busy) {
+        BrandHeader("Step 3 of 3: backup")
+        PanelCard(title = "Back up to your server") {
+            Text("Your vault is saved on this phone. If the phone is lost or broken, only a backup brings it back. " +
+                "Backups go to your own server, encrypted; the server never sees your password or entries.", color = Palette.fgPrimary)
+            MainButton("Connect now (recommended)", { vm.go(Screen.Pairing(PairPurpose.CREATE)) },
+                Modifier.fillMaxWidth().testTag("backupStepConnect"), Icons.Filled.CloudUpload)
+            OutlineButton("Skip", { confirmSkip = true }, Palette.fgPrimary, Modifier.fillMaxWidth().testTag("backupStepSkip"),
+                borderColor = Palette.fgSecondary)
+        }
+    }
+    if (confirmSkip) ConfirmDialog(
+        "Skip the backup?", "You can connect later in Settings → Backup. Until then the vault exists only on this phone.",
+        confirm = "Skip", confirmColor = Palette.red, dismiss = "Back", confirmTag = "backupSkipConfirm",
+        onConfirm = { confirmSkip = false; vm.skipBackupStep() }, onDismiss = { confirmSkip = false },
+    )
+}
+
+/** Restore on a new phone, step 1: which vault (the server lists revisions per Vault ID). */
+@Composable
+internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    var id by remember { mutableStateOf("") }
+    Page("Restore from backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+        PanelCard {
+            Text("Enter the Vault ID of the vault to restore.", color = Palette.fgPrimary)
+            Muted("It is printed on your Emergency Kit. On the server,  mvault-admin stats  lists the IDs of all backed-up vaults.")
+            PlainField(id, { id = it; vm.restoreError = null }, "Vault ID", tag = "restoreVaultId", keyboardType = KeyboardType.Uri)
+            vm.restoreError?.let { ErrorText(it, "restoreError") }
+            MainButton("Show backups", { vm.loadRestoreRevisions(id) }, Modifier.fillMaxWidth().testTag("restoreLoad"),
+                Icons.Filled.CloudDownload, enabled = id.isNotBlank() && !vm.busy)
+        }
+    }
+}
+
+/** One server revision as a tappable row. */
+@Composable
+private fun RevisionRow(r: RemoteRev, newest: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Palette.bgPanel, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp).testTag("rev:${r.rev}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Revision ${r.rev}" + if (newest) "  (newest)" else "", color = Palette.fgPrimary, fontWeight = FontWeight.Bold)
+            Muted("${localTime(r.received)} · ${"%.1f".format(r.size / 1024.0)} KB" + if (r.device.isNotEmpty()) " · ${r.device}" else "")
+        }
+        Icon(Icons.Filled.History, null, tint = Palette.fgSecondary)
+    }
+}
+
+/** Restore step 2: pick a revision (newest first). */
+@Composable
+internal fun RestoreListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    Page("Choose a backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+        Muted("Vault ${vm.restoreVaultId}. The newest backup is usually the right one.")
+        vm.remoteRevs.forEachIndexed { i, r -> RevisionRow(r, i == 0) { vm.pickRestoreRevision(r.rev) } }
+    }
+}
+
+/** Restore step 3: unlock the downloaded file with the master password or the recovery key. */
+@Composable
+internal fun RestoreUnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    val h = vm.restoreHeader ?: return
+    var useKey by remember { mutableStateOf(false) }
+    var pw by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
+    Page("Unlock the backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+        PanelCard {
+            Text("Revision ${h.rev}, saved ${localTime(h.updated)}", color = Palette.fgPrimary)
+            if (!useKey) {
+                PasswordField(pw, { pw = it; vm.restoreError = null }, "Master password", tag = "restorePw", imeAction = ImeAction.Go,
+                    onDone = { if (pw.isNotEmpty()) { vm.restoreUnlock(pw.toCharArray(), null); pw = "" } })
+                h.hint?.let { Muted("Hint: $it") }
+            } else {
+                KeyField(key, { key = it; vm.restoreError = null }, "Recovery key", tag = "restoreKey")
+            }
+            vm.restoreError?.let { ErrorText(it, "restoreError") }
+            MainButton("Restore", {
+                if (useKey) vm.restoreUnlock(null, key) else { vm.restoreUnlock(pw.toCharArray(), null); pw = "" }
+            }, Modifier.fillMaxWidth().testTag("restoreUnlock"), Icons.Filled.LockOpen,
+                enabled = !vm.busy && if (useKey) key.isNotBlank() else pw.isNotEmpty())
+            if (h.hasRecoveryKey) TextButton(onClick = { useKey = !useKey; vm.restoreError = null }) {
+                Text(if (useKey) "Use the master password instead" else "Forgot password? Use recovery key", color = Palette.navFg)
+            }
+            Muted("The backup becomes the vault on this phone, and backups continue from this revision.")
+        }
+    }
+}
+
+/** Settings → Backup → Version history: preview an old revision and restore it as a new one. */
+@Composable
+internal fun HistoryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    var confirm by remember { mutableStateOf(false) }
+    var pw by remember { mutableStateOf("") }
+    Page("Version history", snackbar, onBack = { vm.closePreview(); vm.back() }, busy = vm.busy) {
+        val p = vm.preview
+        if (p != null) PanelCard(Modifier.testTag("preview"), title = "Revision ${p.rev}") {
+            Text("${p.entries} entries, saved ${localTime(p.updated)}", color = Palette.fgPrimary, modifier = Modifier.testTag("previewText"))
+            Muted(p.payload.activeEntries.take(8).joinToString(", ") { it.service } + if (p.entries > 8) ", …" else "")
+            ColorButton("Restore this version", { confirm = true }, Palette.violet, Modifier.fillMaxWidth().testTag("restoreVersion"),
+                Icons.Filled.Restore, enabled = !vm.busy)
+            SecondaryButton("Close", { vm.closePreview() }, Modifier.fillMaxWidth())
+        }
+        if (vm.previewNeedsPassword) PanelCard(title = "Password of that version") {
+            Muted("This version doesn't open with the current key. Enter the master password it had.")
+            PasswordField(pw, { pw = it }, "Master password", tag = "previewPw")
+            MainButton("Open", { vm.previewWithPassword(pw.toCharArray()); pw = "" }, Modifier.fillMaxWidth(), enabled = pw.isNotEmpty())
+        }
+        Muted("Backups on the server, newest first. Tap one to see what it contains.")
+        vm.remoteRevs.forEachIndexed { i, r -> RevisionRow(r, i == 0) { vm.previewRevision(r.rev) } }
+    }
+    val p = vm.preview
+    if (confirm && p != null) ConfirmDialog(
+        "Restore revision ${p.rev}?",
+        "The vault will contain the ${p.entries} entries of that version. Your current state is kept as a local snapshot and on the server; " +
+            "the restored version is saved as a new revision. Your master password and recovery key stay as they are now.",
+        confirm = "Restore", confirmColor = Palette.violet, confirmTag = "restoreVersionConfirm",
+        onConfirm = { confirm = false; vm.restoreVersion() }, onDismiss = { confirm = false },
+    )
+}
+
+/** On the vault list every 30 days: "Test your backup". */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TestRestoreCard(vm: AppViewModel) {
+    val c by vm.backupConfig.collectAsState()
+    val st by vm.backupStatus.collectAsState()
+    val dismissed by vm.testRestoreDismissedAt.collectAsState(0L)
+    val now = vm.reminderNow()
+    if (!TestRestoreReminder.due(c != null, st, c?.pairedAt ?: 0, dismissed, now)) return
+    PanelCard(Modifier.testTag("testRestoreCard"), title = "Test your backup") {
+        Muted("Check that the latest backup on your server can really be decrypted. Nothing is changed.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ColorButton("Test restore now", { vm.testRestore() }, Palette.blue, Modifier.testTag("testRestoreNow"), Icons.Filled.Verified)
+            OutlineButton("Later", { vm.dismissTestRestoreReminder() }, Palette.fgSecondary)
+        }
     }
 }

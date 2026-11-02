@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -131,6 +132,11 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         Screen.About -> AboutScreen(vm, snackbar)
         Screen.Backup -> BackupScreen(vm, snackbar)
         is Screen.Pairing -> PairingScreen(vm, snackbar, s.purpose)
+        Screen.BackupStep -> BackupStepScreen(vm, snackbar)
+        Screen.RestoreStart -> RestoreStartScreen(vm, snackbar)
+        Screen.RestoreList -> RestoreListScreen(vm, snackbar)
+        Screen.RestoreUnlock -> RestoreUnlockScreen(vm, snackbar)
+        Screen.History -> HistoryScreen(vm, snackbar)
     }
 }
 
@@ -165,10 +171,10 @@ private fun OnboardingScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     Page("", snackbar, busy = vm.busy) {
         BrandHeader("Your passwords, encrypted on this phone.")
         PanelCard {
-            Muted("Nothing leaves the phone unless you export it. Backups to your own server come in a later version.")
+            Muted("Only the encrypted vault file ever leaves the phone: to your own backup server, if you connect one.")
             MainButton("Create new vault", { vm.go(Screen.Create(null)) }, Modifier.fillMaxWidth().testTag("create"), Icons.Filled.Add)
             ColorButton("Import from desktop (.vault)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FolderOpen)
-            SecondaryButton("Restore from server (coming soon)", {}, Modifier.fillMaxWidth(), enabled = false)
+            ColorButton("Restore from backup", { vm.startRestore() }, Palette.steel, Modifier.fillMaxWidth().testTag("restore"), Icons.Filled.CloudDownload)
         }
     }
 }
@@ -223,7 +229,7 @@ private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Scree
         return
     }
     Page("Create vault", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        BrandHeader("Step 1 of 2: master password")
+        BrandHeader("Step 1 of 3: master password")
         PanelCard {
             s.imported?.let { Muted("${it.activeEntries.size} entries from the desktop file will be in the new vault.") }
             val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
@@ -237,7 +243,7 @@ private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Scree
 private fun RecoveryKeyStep(vm: AppViewModel, snackbar: SnackbarHostState, onBack: () -> Unit, create: (withKey: Boolean) -> Unit) {
     var confirmSkip by remember { mutableStateOf(false) }
     Page("Create vault", snackbar, onBack = onBack, busy = vm.busy) {
-        BrandHeader("Step 2 of 2: recovery key")
+        BrandHeader("Step 2 of 3: recovery key")
         PanelCard(title = "Recovery key") {
             Text(buildAnnotatedString {
                 append("A recovery key is a 36-character code you print or write down. If you forget your master password, it is the ")
@@ -390,6 +396,7 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         PlainField(query, { query = it }, "Search service, username or URL", tag = "search", leading = Icons.Filled.Search)
         ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
         BackupChip(vm)
+        TestRestoreCard(vm)
         if (vm.kitPending) KitPendingCard(vm)
         if (entries.isEmpty()) Muted(if (query.isEmpty()) "No entries yet. Tap + to add one." else "Nothing found.")
         LazyColumn(Modifier.background(Palette.bgPanel, RoundedCornerShape(12.dp))) {

@@ -37,3 +37,11 @@ object BackupHealth {
         else -> "${ms / DAY} days ago"
     }
 }
+
+/** "Test your backup" reminder: every 30 days after the last test (or pairing / dismissing), once something is backed up. */
+object TestRestoreReminder {
+    const val DAYS = 30
+    fun due(paired: Boolean, s: BackupStatus, pairedAt: Long, dismissedAt: Long, now: Long): Boolean =
+        paired && !s.disconnected && s.lastSuccessAt > 0 &&
+            now - maxOf(s.testRestoreAt, pairedAt, dismissedAt) >= DAYS * 24 * 3_600_000L
+}

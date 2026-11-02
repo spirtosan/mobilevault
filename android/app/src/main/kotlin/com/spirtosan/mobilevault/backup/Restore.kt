@@ -1,0 +1,61 @@
+package com.spirtosan.mobilevault.backup
+
+import com.spirtosan.mobilevault.crypto.Pvault2
+import com.spirtosan.mobilevault.crypto.VaultHeader
+import com.spirtosan.mobilevault.crypto.VaultPayload
+import com.spirtosan.mobilevault.crypto.WrongKeyException
+import com.spirtosan.mobilevault.crypto.VaultFormatException
+
+/** Restore, version history and test restore: the parts that don't touch Android. */
+object Restore {
+    private val UUID_RE = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+    /** Vault ID as typed or pasted (case, spaces and a `Vault ID:` prefix don't matter); null if invalid. */
+    fun normalizeVaultId(text: String): String? =
+        Regex("[0-9a-fA-F-]{36}").find(text.trim())?.value?.lowercase()?.takeIf { UUID_RE.matches(it) }
+
+    fun newestFirst(revs: List<RemoteRev>) = revs.sortedByDescending { it.rev }
+
+    /** Download a revision and make sure it is the file we asked for (PVAULT2, same vault_id and rev). */
+    suspend fun fetch(target: BackupTarget, vaultId: String, rev: Long): ByteArray =
+        target.download(vaultId, rev).also { check(it, vaultId, rev) }
+
+    fun check(raw: ByteArray, vaultId: String, rev: Long): VaultHeader {
+        val h = try { Pvault2.peekHeader(raw) } catch (e: VaultFormatException) {
+            throw BackupException(BackupException.Kind.REJECTED, "The downloaded file is not a Mobile Vault file.")
+        }
+        if (h.vaultId != vaultId) throw BackupException(BackupException.Kind.REJECTED,
+            "The downloaded file belongs to another vault (${h.vaultId}). Nothing was changed.")
+        if (h.rev != rev) throw BackupException(BackupException.Kind.REJECTED,
+            "The downloaded file is revision ${h.rev}, not $rev. Nothing was changed.")
+        return h
+    }
+
+    /** A restored old version is saved as a new revision above everything known: nothing is lost. */
+    fun rollbackRev(localRev: Long, remoteLatest: Long) = maxOf(localRev, remoteLatest) + 1
+
+    class Preview(val rev: Long, val updated: String, val payload: VaultPayload) {
+        val entries get() = payload.activeEntries.size
+    }
+
+    /** Decrypt in memory with the open vault's DEK (a copy is consumed). Null if the DEK doesn't open it. */
+    fun preview(raw: ByteArray, dekCopy: ByteArray): Preview? = try {
+        val v = Pvault2.unlockWithDek(raw, dekCopy)
+        val p = Preview(v.rev, v.header.updated, v.payload)
+        v.wipe()
+        p
+    } catch (e: WrongKeyException) { null } catch (e: VaultFormatException) { null }
+
+    class TestResult(val ok: Boolean, val text: String)
+
+    /** Test restore: download the latest revision, decrypt it in memory, compare the entry count. Writes nothing. */
+    suspend fun testRestore(target: BackupTarget, vaultId: String, dekCopy: suspend () -> ByteArray, localEntries: Int): TestResult {
+        val latest = target.latest(vaultId) ?: return TestResult(false, "There is no backup of this vault on the server yet.")
+        val raw = fetch(target, vaultId, latest.rev)
+        val p = preview(raw, dekCopy()) ?: return TestResult(false,
+            "The latest backup (revision ${latest.rev}) could not be decrypted with this vault's key.")
+        val same = p.entries == localEntries
+        return TestResult(true, "✓ Backup revision ${latest.rev} decrypts: ${p.entries} entries" +
+            if (same) ", same as on this phone." else " (this phone has $localEntries; the newest changes may still be uploading).")
+    }
+}

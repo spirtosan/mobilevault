@@ -11,6 +11,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spirtosan.mobilevault.MobileVaultApp
 import com.spirtosan.mobilevault.backup.BackupException
+import com.spirtosan.mobilevault.backup.HttpBackupTarget
+import com.spirtosan.mobilevault.backup.RemoteRev
+import com.spirtosan.mobilevault.backup.Restore
 import com.spirtosan.mobilevault.backup.PairingPayload
 import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.crypto.HintPolicy
@@ -19,6 +22,7 @@ import com.spirtosan.mobilevault.crypto.Pvault2
 import com.spirtosan.mobilevault.crypto.RecoveryKey
 import com.spirtosan.mobilevault.crypto.UnlockedVault
 import com.spirtosan.mobilevault.crypto.VaultFormatException
+import com.spirtosan.mobilevault.crypto.VaultHeader
 import com.spirtosan.mobilevault.crypto.VaultPayload
 import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.wipe
@@ -54,6 +58,12 @@ sealed interface Screen {
     data object Backup : Screen
     /** Pair with the server; [purpose] decides where the flow continues afterwards. */
     data class Pairing(val purpose: PairPurpose) : Screen
+    /** Create flow, step 3: connect to the backup server or skip. */
+    data object BackupStep : Screen
+    data object RestoreStart : Screen
+    data object RestoreList : Screen
+    data object RestoreUnlock : Screen
+    data object History : Screen
 }
 
 enum class PairPurpose { SETTINGS, RESTORE, CREATE }
@@ -200,8 +210,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         hasRecoveryKey = created.recoveryKey != null
         val rk = created.recoveryKey
         if (rk != null) showKit(rk, created.vault.vaultId, newVault = true)
-        else { kitPending = false; replace(Screen.VaultList); message = "Vault created without a recovery key" }
+        else { kitPending = false; replace(afterCreate()); message = "Vault created without a recovery key" }
     }
+
+    /** After a new vault: offer the backup server (step 3) unless this phone is already connected. */
+    private fun afterCreate(): Screen = if (a.backup.isPaired) Screen.VaultList.also { a.queueBackup() } else Screen.BackupStep
 
     private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean) {
         kitPending = true
@@ -221,7 +234,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             kitPending = false
             k.key.wipe()
             kit = null
-            replace(Screen.VaultList)
+            replace(if (k.newVault) afterCreate() else Screen.VaultList)
             message = if (k.newVault) "Vault created" else "New recovery key saved. The old one no longer works."
         }
         return true
@@ -477,7 +490,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun afterPairing(purpose: PairPurpose) {
         when (purpose) {
-            PairPurpose.SETTINGS, PairPurpose.RESTORE, PairPurpose.CREATE -> back()
+            PairPurpose.SETTINGS -> back()
+            PairPurpose.RESTORE -> { back(); go(Screen.RestoreStart) }
+            PairPurpose.CREATE -> { replace(Screen.VaultList); a.queueBackup() }
         }
     }
 
@@ -495,6 +510,152 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         connectionText = null
         message = "This phone is no longer connected to the backup server"
     }
+
+    // ── restore, version history, test restore ────────────────────────────────
+    /** Server revisions, newest first (restore list or version history). */
+    var remoteRevs by mutableStateOf<List<RemoteRev>>(emptyList()); private set
+    var restoreError by mutableStateOf<String?>(null)
+    var restoreVaultId by mutableStateOf<String?>(null); private set
+    /** Header of the downloaded file waiting for the password (restore on a new phone). */
+    var restoreHeader by mutableStateOf<VaultHeader?>(null); private set
+    private var restoreRaw: ByteArray? = null
+    /** Version history: the picked revision, decrypted in memory. */
+    var preview by mutableStateOf<Restore.Preview?>(null); private set
+    /** Version history: the picked file did not open with the current DEK, ask for its password. */
+    var previewNeedsPassword by mutableStateOf(false); private set
+    private var previewRaw: ByteArray? = null
+
+    private fun target() = a.backup.requireTarget()
+
+    /** Onboarding → "Restore from backup": pair first if needed. */
+    fun startRestore() {
+        restoreError = null
+        if (a.backup.isPaired && !a.backup.status.value.disconnected) go(Screen.RestoreStart) else go(Screen.Pairing(PairPurpose.RESTORE))
+    }
+
+    fun loadRestoreRevisions(vaultIdText: String) = work {
+        restoreError = null
+        val id = Restore.normalizeVaultId(vaultIdText) ?: run { restoreError = "That is not a Vault ID (36 characters like 1a2b3c4d-…)."; return@work }
+        try {
+            val revs = Restore.newestFirst(target().list(id))
+            if (revs.isEmpty()) { restoreError = "The server has no backups of vault $id."; return@work }
+            restoreVaultId = id
+            remoteRevs = revs
+            go(Screen.RestoreList)
+        } catch (e: BackupException) { restoreError = e.text }
+    }
+
+    fun pickRestoreRevision(rev: Long) = work {
+        restoreError = null
+        val id = restoreVaultId ?: return@work
+        try {
+            val raw = Restore.fetch(target(), id, rev)
+            restoreRaw = raw
+            restoreHeader = Pvault2.peekHeader(raw)
+            go(Screen.RestoreUnlock)
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    /** Open the downloaded file with the master password or (if it has one) the recovery key, then save it as the local vault. */
+    fun restoreUnlock(password: CharArray?, recoveryKeyText: String?) = work {
+        restoreError = null
+        val raw = restoreRaw ?: return@work
+        if (repo.exists()) { fail("This phone already has a vault. Restore is only offered for a new vault."); return@work }
+        val v = try {
+            withContext(Dispatchers.Default) {
+                if (password != null) Pvault2.unlockWithPassword(raw, password)
+                else Pvault2.unlockWithRecoveryKey(raw, RecoveryKey.parse(recoveryKeyText ?: ""))
+            }
+        } catch (e: WrongKeyException) {
+            restoreError = if (password != null) "Wrong password for this backup." else "This recovery key does not open this backup."
+            return@work
+        } catch (e: IllegalArgumentException) {
+            restoreError = e.message ?: "That is not a valid recovery key"; return@work
+        } finally { password?.wipe() }
+        // The file is on the server already: record it, so the upload queued by the save has nothing to do.
+        a.backup.updateStatus {
+            it.copy(lastSuccessAt = System.currentTimeMillis(), lastSuccessRev = v.rev, lastSuccessSha = HttpBackupTarget.sha256Hex(raw),
+                lastError = null, stopped = false, needsNewRev = false)
+        }
+        withContext(Dispatchers.IO) { repo.save(raw) }
+        prefs.clearFailures()
+        prefs.setKitPending(false)
+        restoreRaw = null; restoreHeader = null; remoteRevs = emptyList()
+        val rev = v.rev
+        if (recoveryKeyText != null) {
+            hasRecoveryKey = true
+            session.open(v)
+            afterUnlock()
+            replace(Screen.NewPassword(forced = true))
+        } else openAndShowList(v)
+        message = "Restored revision $rev from the server"
+    }
+
+    fun openHistory() = work {
+        closePreview()
+        val id = session.read { it.vaultId } ?: return@work
+        try {
+            remoteRevs = Restore.newestFirst(target().list(id))
+            go(Screen.History)
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    fun previewRevision(rev: Long) = work {
+        closePreview()
+        val id = session.read { it.vaultId } ?: return@work
+        try {
+            val raw = Restore.fetch(target(), id, rev)
+            previewRaw = raw
+            val p = withContext(Dispatchers.Default) { session.read { Restore.preview(raw, it.exportDekForBiometric()) } }
+            if (p != null) preview = p else previewNeedsPassword = true
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    fun previewWithPassword(password: CharArray) = work {
+        val raw = previewRaw ?: return@work
+        try {
+            val v = withContext(Dispatchers.Default) { Pvault2.unlockWithPassword(raw, password) }
+            preview = Restore.Preview(v.rev, v.header.updated, v.payload)
+            previewNeedsPassword = false
+            v.wipe()
+        } catch (e: WrongKeyException) { fail("Wrong password for this version") } finally { password.wipe() }
+    }
+
+    fun closePreview() { preview = null; previewNeedsPassword = false; previewRaw = null }
+
+    /** Snapshot the current vault (done by every save), then save the old content as a new revision above everything known. */
+    fun restoreVersion() = work {
+        val p = preview ?: return@work
+        val id = session.read { it.vaultId } ?: return@work
+        val remote = try { target().latest(id)?.rev ?: 0L } catch (e: BackupException) { fail(e.text); return@work }
+        val newRev = Restore.rollbackRev(session.rev.value, remote)
+        session.reseal(newRev, p.payload)
+        closePreview()
+        replace(Screen.VaultList)
+        message = "Restored the version of revision ${p.rev} as revision $newRev. The state before is kept in local snapshots and on the server."
+    }
+
+    fun testRestore() = work {
+        val id = session.read { it.vaultId } ?: return@work
+        val local = session.payload.value?.activeEntries?.size ?: 0
+        try {
+            val r = Restore.testRestore(target(), id, { session.read { it.exportDekForBiometric() } ?: ByteArray(32) }, local)
+            if (r.ok) {
+                a.backup.updateStatus { it.copy(testRestoreAt = System.currentTimeMillis(), testRestoreText = r.text) }
+                message = "Test restore OK"
+            } else fail(r.text)
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    val testRestoreDismissedAt get() = prefs.testRestoreDismissedAt
+
+    /** Create flow, step 3 → "Skip": the red "No backup set up" chip stays on the list. */
+    fun skipBackupStep() = replace(Screen.VaultList)
+
+    /** Wall clock for reminders (debug builds can fast-forward it, see Part E). */
+    fun reminderNow(): Long = System.currentTimeMillis()
+
+    fun dismissTestRestoreReminder() = viewModelScope.launch { prefs.setTestRestoreDismissed(System.currentTimeMillis()) }
 
     // ── helpers ───────────────────────────────────────────────────────────────
     private fun work(block: suspend () -> Unit) {
