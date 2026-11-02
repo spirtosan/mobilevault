@@ -1,10 +1,10 @@
 # Handoff for the next session
 
-_Last updated: 2026-10-30. Read this first, then `docs/STATUS.md`._
+_Last updated: 2026-11-03. Read this first, then `docs/STATUS.md`._
 
 ## 1. What this project is
 **Mobile Vault** is an Android password manager for one owner (non-commercial, GPL-3.0). It is based on the desktop app **Shu PassVault** (`C:\Users\spirt\passvault`, Python/Tkinter; copy in `reference/desktop-passvault/`).
-The main goal is **maximum protection against losing passwords**: strong offline encryption, a recovery key for a forgotten master password, password reminders, and versioned zero-knowledge backups to the owner's **own Ubuntu server**.
+The main goal is **maximum protection against losing passwords**: strong offline encryption, an (optional, recommended) recovery key for a forgotten master password, password reminders, and versioned zero-knowledge backups to the owner's **own Ubuntu server**.
 
 ## 2. Where everything is
 | Thing | Location |
@@ -13,7 +13,8 @@ The main goal is **maximum protection against losing passwords**: strong offline
 | Specs | `docs/ANDROID_APP_SPEC.md`, `docs/VAULT_FORMAT_V2.md`, `docs/BACKUP_AND_RECOVERY.md`, `docs/DECISIONS.md` |
 | Server state + hardening log | `docs/SERVER_CHECK.md` |
 | Progress + to-dos | `docs/STATUS.md` |
-| Encryption library (M1, done) | `android/core-crypto` (Kotlin/JVM). Tests: `cd android && gradlew.bat :core-crypto:test` (27/27) |
+| Encryption library (M1, done) | `android/core-crypto` (Kotlin/JVM). Tests: `cd android && gradlew.bat :core-crypto:test` (38) |
+| Android app (M2 + Task 06, done) | `android/app` (Compose). Build/test/install notes: `android/README.md`. Screenshots: `docs/screenshots/task06/` |
 | Python reference of PVAULT2 | `android/tools/pvault2.py` |
 | Backup server code | `server/` (Python stdlib). Installed on the server in `/opt/mvault`, config `/etc/mvault/config.json`, admin CLI `mvault-admin` |
 | Backup API | `https://vault.<DOMAIN>/api/v1` (live; smoke test `server/tools/mvault_smoke.py`) |
@@ -21,33 +22,27 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–04 are done; 05 (M2) has been handed over; the next new one is 06.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–06 are done; the next new one is 07.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
 
 ## 4. Key decisions (details in DECISIONS.md)
 - Kotlin + Jetpack Compose, minSdk 28, app ID `com.spirtosan.mobilevault`, GPL-3.0.
-- Vault format **PVAULT2**: random DEK; slots = password (Argon2id 64 MiB/t3/p1, NFC-normalised) + recovery key (160-bit, 36 chars Crockford Base32 + checksum, HKDF); header = GCM AAD; optional plaintext hint; `rev` counter; entry UUIDs + tombstones. Reads desktop **PVAULT1** for import.
+- Vault format **PVAULT2**: random DEK; slots = password (Argon2id, calibrated per phone, 64 MiB/t3/p4 on the Xiaomi, NFC-normalised) + **optional** recovery key (160-bit, 36 chars Crockford Base32 + checksum, HKDF; owner's choice 2026-11-02); header = GCM AAD; optional plaintext hint; `rev` counter; entry UUIDs + tombstones. Reads desktop **PVAULT1** for import.
 - Backups: **only the own server**, over HTTPS 443 through the existing nginx. Append-only API (no delete/overwrite); mTLS client cert (key in Android Keystore) + bearer token; QR pairing (`mvault-admin pair <name>`, payload has URL, one-time code and SPKI pins incl. the backup pin); `revoke` for lost phones. Retention: last 30 + weekly for 52 weeks; hourly root-owned mirror to the 2nd disk.
 - No Google Drive, no SFTP, SSH is LAN-only (not port-forwarded).
+- Master password: minimum 6 characters, orange warning below 10 or below "Fair" (owner's choice 2026-11-02).
+- UI: dark, desktop palette with colour meaning (orange main action, green add, blue edit, red delete/lock, teal/steel/purple copy, amber show, violet import/new).
 
 ## 5. Next steps
 ### Test phones (answered 2026-10-30)
 Huawei Android 10 (API 29, **probably no Google services**, so no GMS/ML Kit/Firebase anywhere; use ZXing for QR), Motorola Android 12 (API 31), Xiaomi Android 16 (API 36, edge-to-edge, aggressive autostart limits; needs "Install via USB" + Mi account for adb installs). Android Studio is installed on the PC (JDK 21 in its `jbr`, not on PATH).
 
-### M2 has been handed to Claude Code as `docs/CLAUDE_CODE_TASK_05.md`
-Claude Code builds the app (it has the Android SDK and the phones); the cloud session reviews. Step 1 of the task is an Argon2 benchmark on all three phones; its results set the KDF parameters.
+### Done: M2 (Task 05) and Task 06
+App MVP on the Xiaomi; Task 06 fixed the recovery-key bug, made the recovery key optional, lowered the master-password minimum to 6 and restyled the UI. Phone checklist results in `STATUS.md` (items 7, 10 and the desktop GUI part of 12 need the owner). Huawei and Motorola still to test with the current build.
 
-### M2: Android app MVP (Task 05, scope summary)
-1. Create the `app` module (AGP, Compose, Material 3 dark theme with the desktop palette, minSdk 28) and `include(":app")`; depend on `:core-crypto`.
-2. Screens: onboarding (create / import desktop file / restore later), create vault (password + strength + optional hint via `HintPolicy`, Emergency Kit showing the recovery key once with a 3-random-character confirmation), unlock (hint after the first failure), list + search, entry add/edit/delete, settings.
-3. Storage: vault file in `filesDir`, atomic write (tmp + fsync + rename), local snapshots (last 20 + daily for 30 days).
-4. Security: `FLAG_SECURE`, lock on background/screen-off + 5 min idle, clipboard clear + `EXTRA_IS_SENSITIVE`, no-learning IME flags, `allowBackup=false`, no INTERNET permission yet.
-5. **Tune Argon2 on the real phone** (PC: 307 ms for create+unlock; target 0.5–1 s per unlock, never below 32 MiB/t2).
-6. Desktop import via SAF file picker → `Pvault1.decrypt` → PVAULT2.
-
-### M3: backup client + reminders
+### Next: Task 07 = M3: backup client, biometric unlock, reminders
 Pairing (scan QR → Keystore EC P-256 key → CSR → `POST /pair`), OkHttp with mTLS + pins, WorkManager upload queue, version list + restore + test restore, backup health indicator, biometric unlock (Keystore-wrapped DEK), periodic password confirmation, yearly Emergency Kit reminder.
 
 ### Later
@@ -66,3 +61,9 @@ Server (future task): stale TURN `external-ip`; restic + off-site backup of the 
 - sshd uses the first value it reads: put overrides in `sshd_config.d/00-*.conf` (cloud-init's `50-` file sets PasswordAuthentication).
 - The cloud sandbox refuses `rm -rf` with globs after `cd`; use fresh `mktemp -d` dirs. Transfer files to the PC as a `.tgz` via `device_commit_files`, then extract (`*.tgz` is git-ignored; the linked shell can't delete files).
 - Don't let the nginx catch-all serve app folders: delete folders **before** removing their deny rules.
+- Xiaomi/HyperOS: adb taps need "USB debugging (Security settings)" **and** USB debugging toggled off/on afterwards. HyperOS may block *new* USB installs ("Block installation") while updates still work.
+- The installed test app is a release build signed with the PC's debug keystore. Sign new release builds with the same key and `adb install -r`: a different key means uninstall = vault lost. Check before installing.
+- `connectedDebugAndroidTest` uninstalls the debug app (and its data) afterwards.
+- Compose UI tests: right after typing, the keyboard animation can move a button and an injected tap misses; click via `performSemanticsAction(OnClick)`.
+- `Session.lockEvents` fire even when nothing is open; only reset screens when a vault, kit or import was actually open. Save a new vault/recovery key **before** showing the key.
+- Windows working copy has mixed CRLF/LF files: edit with tools that keep the line endings.
