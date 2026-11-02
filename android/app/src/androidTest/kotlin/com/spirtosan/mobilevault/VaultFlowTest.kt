@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -306,6 +308,34 @@ class VaultFlowTest {
             waitFor("removeConfirm")
             tag("removeConfirm").performClick()
             waitFor("noRecoveryKey")
+        }
+    }
+
+    // ── master password length (Part C) ──────────────────────────────────────
+    /** 5 characters: blocked. 6 characters: allowed with the orange warning. A long password: no warning. */
+    @Test
+    fun sixCharacterPasswordWarnsFiveBlocked() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            waitFor("create")
+            tag("create").performClick()
+            tag("pw").performTextInput("k7#Lp")
+            tag("pw2").performTextInput("k7#Lp")
+            rule.waitForIdle()
+            tag("createSubmit").assertIsNotEnabled()
+            gone("weakWarning")
+
+            tag("pw").performTextInput("2")
+            tag("pw2").performTextInput("2")
+            waitFor("weakWarning")
+            waitFor("createSubmit", enabled = true)
+
+            tag("pw").performTextClearance(); tag("pw2").performTextClearance()
+            val strong = "correct-horse-battery-staple-xk"      // (the suite's pw contains "password": Very weak)
+            tag("pw").performTextInput(strong); tag("pw2").performTextInput(strong)
+            rule.waitForIdle()
+            gone("weakWarning")
+            waitFor("createSubmit", enabled = true)
         }
     }
 }

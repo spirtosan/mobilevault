@@ -10,6 +10,7 @@ import com.spirtosan.mobilevault.data.VaultEdits
 import com.spirtosan.mobilevault.data.VaultRepository
 import com.spirtosan.mobilevault.security.KdfCalibration
 import com.spirtosan.mobilevault.security.PasswordGenerator
+import com.spirtosan.mobilevault.security.MasterPasswordPolicy
 import com.spirtosan.mobilevault.security.PasswordStrength
 import com.spirtosan.mobilevault.security.UnlockThrottle
 import org.junit.Assert.assertArrayEquals
@@ -165,6 +166,17 @@ class SecurityHelpersTest {
         assertTrue(lvl("Tr0ub4dor&3") >= 2)
         assertEquals(4, lvl("correct-horse-battery-staple-xk"))
         assertEquals(0, PasswordStrength.score(CharArray(0)).bits)
+    }
+
+    @Test
+    fun masterPasswordPolicy() {
+        fun v(s: String) = MasterPasswordPolicy.check(s.toCharArray())
+        assertEquals(MasterPasswordPolicy.Verdict.TOO_SHORT, v(""))
+        assertEquals(MasterPasswordPolicy.Verdict.TOO_SHORT, v("Ab3$5"))           // 5: blocked
+        assertEquals(MasterPasswordPolicy.Verdict.WEAK, v("Ab3$5x"))               // 6: allowed, warning
+        assertEquals(MasterPasswordPolicy.Verdict.WEAK, v("k7#Lp2q!w"))            // 9: still short
+        assertEquals(MasterPasswordPolicy.Verdict.WEAK, v("aaaaaaaaaaaaaa"))       // long but weak
+        assertEquals(MasterPasswordPolicy.Verdict.OK, v("correct-horse-battery"))
     }
 
     @Test

@@ -58,7 +58,7 @@ Forgetting the master password is the most likely way to lose everything, especi
 
 ## Screens
 1. Onboarding: Create new vault / Import desktop file / Restore from backup
-2. Create vault: master password + strength meter, then the recovery-key step ("Create recovery key (recommended)" → Emergency Kit, or "Skip" with a confirmation), then set up a backup target (strongly recommended, can be skipped with a warning)
+2. Create vault: master password + strength meter (minimum 6 characters, warning below 10 or below "Fair"), then the recovery-key step ("Create recovery key (recommended)" → Emergency Kit, or "Skip" with a confirmation), then set up a backup target (strongly recommended, can be skipped with a warning)
 3. Unlock: password field, biometric button; "Forgot password? Use recovery key" only when the vault has a recovery slot
 4. Vault list: search bar, entries, FAB "+", backup status chip
 5. Entry detail / edit (same fields as desktop + notes), generator button

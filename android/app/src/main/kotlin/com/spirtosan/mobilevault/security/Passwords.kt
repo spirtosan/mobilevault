@@ -46,6 +46,23 @@ object PasswordStrength {
     }
 }
 
+/**
+ * Master password rule (owner's choice, 2026-11-02): at least [MIN_LENGTH] characters is required;
+ * shorter than [COMFORT_LENGTH] or below "Fair" only shows a warning.
+ */
+object MasterPasswordPolicy {
+    const val MIN_LENGTH = 6
+    const val COMFORT_LENGTH = 10
+
+    enum class Verdict { TOO_SHORT, WEAK, OK }
+
+    fun check(pw: CharArray): Verdict = when {
+        pw.size < MIN_LENGTH -> Verdict.TOO_SHORT
+        pw.size < COMFORT_LENGTH || PasswordStrength.score(pw).level < 2 -> Verdict.WEAK
+        else -> Verdict.OK
+    }
+}
+
 /** Random passwords and passphrases (SecureRandom). */
 class PasswordGenerator(private val words: () -> List<String>, private val rng: SecureRandom = SecureRandom()) {
     data class Options(

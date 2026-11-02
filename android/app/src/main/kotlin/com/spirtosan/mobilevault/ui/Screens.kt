@@ -65,10 +65,12 @@ import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
+import com.spirtosan.mobilevault.security.MasterPasswordPolicy
 import com.spirtosan.mobilevault.security.PasswordGenerator
 import kotlin.math.roundToInt
 
-private const val MIN_MASTER_LENGTH = 8
+/** Export files for the desktop app keep the old minimum; the master password rule is [MasterPasswordPolicy]. */
+private const val MIN_EXPORT_LENGTH = 8
 
 @Composable
 fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
@@ -137,16 +139,24 @@ private fun newPasswordFields(
 ): Boolean {
     PasswordField(pw, onPw, "Master password", tag = "pw")
     StrengthMeter(pw)
-    if (pw.isNotEmpty() && pw.length < MIN_MASTER_LENGTH) Muted("Use at least $MIN_MASTER_LENGTH characters.")
+    val chars = pw.toCharArray()
+    val verdict = MasterPasswordPolicy.check(chars)
+    if (pw.isNotEmpty() && verdict == MasterPasswordPolicy.Verdict.TOO_SHORT)
+        Muted("Use at least ${MasterPasswordPolicy.MIN_LENGTH} characters.")
+    // A warning, not a block (owner's choice): the vault file or a backup can be attacked offline.
+    if (verdict == MasterPasswordPolicy.Verdict.WEAK) Text(
+        "Short passwords are easier to guess if someone copies the vault file or a backup. " +
+            "Fine for daily use if your phone has a screen lock.",
+        color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("weakWarning"),
+    )
     PasswordField(confirm, onConfirm, "Repeat master password", tag = "pw2", isError = confirm.isNotEmpty() && confirm != pw)
     PlainField(hint, onHint, "Hint (optional)", tag = "hint")
-    val chars = pw.toCharArray()
     val hintProblem = if (hint.isBlank()) null else vm.hintProblem(hint, chars)
     chars.fill('\u0000')
     if (hintProblem != null) Text(hintProblem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     Muted("The hint is stored unencrypted and shown on the unlock screen to anyone holding the phone. Never put the password itself in it.")
     CalibrationInfo(vm)
-    return pw.length >= MIN_MASTER_LENGTH && pw == confirm && hintProblem == null && vm.calibration != null && !vm.busy
+    return verdict != MasterPasswordPolicy.Verdict.TOO_SHORT && pw == confirm && hintProblem == null && vm.calibration != null && !vm.busy
 }
 
 @Composable
@@ -603,7 +613,7 @@ private fun ExportScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         PasswordField(confirm, { confirm = it }, "Repeat export password", isError = confirm.isNotEmpty() && confirm != pw)
         Button(
             onClick = { vm.externalStarted(); save.launch("mobilevault-export.vault") },
-            enabled = pw.length >= MIN_MASTER_LENGTH && pw == confirm && !vm.busy, modifier = Modifier.fillMaxWidth(),
+            enabled = pw.length >= MIN_EXPORT_LENGTH && pw == confirm && !vm.busy, modifier = Modifier.fillMaxWidth(),
         ) { Text("Choose where to save") }
     }
 }
