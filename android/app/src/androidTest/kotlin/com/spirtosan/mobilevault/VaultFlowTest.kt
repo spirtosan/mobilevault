@@ -1,5 +1,6 @@
 package com.spirtosan.mobilevault
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -56,12 +58,18 @@ class VaultFlowTest {
         }
     }
 
+    /**
+     * Click through the semantics action instead of an injected touch: right after typing, the keyboard
+     * animation (imePadding) can still move the button, and a touch at its old position is lost.
+     */
+    private fun SemanticsNodeInteraction.clickAction() = performSemanticsAction(SemanticsActions.OnClick)
+
     private val newPw = "Brand-new-master-password-7"
 
     private fun unlock(password: String = pw) {
         waitFor("unlockPw")
         tag("unlockPw").performTextInput(password)
-        tag("unlock").performClick()
+        tag("unlock").clickAction()
         waitFor("add")
     }
 
@@ -153,7 +161,7 @@ class VaultFlowTest {
             val g = key.split("\n", "-").map { it.trim() }
             tag("recoveryInput").performTextInput(g.take(5).joinToString("-").lowercase())
             tag("recoveryInput").performTextInput(" " + g.drop(5).joinToString("-").lowercase())
-            tag("recoveryUnlock").performClick()
+            tag("recoveryUnlock").clickAction()
 
             waitFor("pw")
             tag("pw").performTextInput(newPw)
@@ -181,7 +189,7 @@ class VaultFlowTest {
             assertEquals("ABCD-EFGH-1234", fieldText("recoveryInput"))
 
             // a wrong key shows the parser message inline
-            tag("recoveryUnlock").performClick()
+            tag("recoveryUnlock").clickAction()
             waitFor("recoveryError")
             tag("recoveryError").assertTextContains("got 12", substring = true)
         }
@@ -220,7 +228,7 @@ class VaultFlowTest {
             waitFor("toRecovery")
             tag("toRecovery").performClick()
             tag("recoveryInput").performTextInput(key.replace("\n", " "))
-            tag("recoveryUnlock").performClick()
+            tag("recoveryUnlock").clickAction()
             waitFor("newPwSave")
         }
     }

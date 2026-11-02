@@ -71,6 +71,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null)
+    /** The current [message] reports a problem (red snackbar accent instead of green). */
+    var messageError by mutableStateOf(false); private set
+
+    fun fail(text: String) { messageError = true; message = text }
+
+    /** Called by the UI once the snackbar for [message] is shown. */
+    fun messageShown() { message = null; messageError = false }
 
     // Unlock screen
     var unlockError by mutableStateOf<String?>(null); private set
@@ -308,7 +315,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try {
             if (current != null) {
                 val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(current) } }
-                if (!ok) { message = "Current password is wrong"; return@work }
+                if (!ok) { fail("Current password is wrong"); return@work }
             }
             withContext(Dispatchers.Default) {
                 session.withVault(save = true) { it.changePassword(newPassword, hint.ifBlank { null }, kdf) }
@@ -330,7 +337,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun checkPasswordForRemoval(password: CharArray, onOk: () -> Unit) = work {
         try {
             val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
-            if (ok) onOk() else message = "Master password is wrong"
+            if (ok) onOk() else fail("Master password is wrong")
         } finally { password.wipe() }
     }
 
@@ -380,9 +387,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             imported = p
             screen = Screen.ImportPreview(p.activeEntries.size)
         } catch (e: WrongKeyException) {
-            message = "Wrong password for this file"
+            fail("Wrong password for this file")
         } catch (e: VaultFormatException) {
-            message = "Not a desktop vault file: ${e.message}"
+            fail("Not a desktop vault file: ${e.message}")
         } finally { password.wipe() }
     }
 
@@ -419,7 +426,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             busy = true
             try { block() } catch (e: Exception) {
-                message = "Error: ${e.message ?: e.javaClass.simpleName}"
+                fail("Error: ${e.message ?: e.javaClass.simpleName}")
             } finally { busy = false }
         }
     }

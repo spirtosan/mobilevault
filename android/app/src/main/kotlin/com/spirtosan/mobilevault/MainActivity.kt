@@ -16,7 +16,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // No screenshots, no screen recording, blank thumbnail in the recent-apps list.
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Debug builds only: `am start ... --ez debug_allow_screenshots true` leaves it off, for UI screenshots
+        // with test data. BuildConfig.DEBUG is a constant false in release, so R8 removes the branch.
+        val allowScreenshots = BuildConfig.DEBUG && intent.getBooleanExtra("debug_allow_screenshots", false)
+        if (!allowScreenshots) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         setContent { MobileVaultTheme { AppRoot(vm, ::finish) } }
     }

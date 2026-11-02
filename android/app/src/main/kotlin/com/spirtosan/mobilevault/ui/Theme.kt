@@ -25,8 +25,20 @@ object Palette {
     val onOrange = Color(0xFF1A1A1A)
     val blue = Color(0xFF2980B9)
     val red = Color(0xFFE74C3C)
+    val green = Color(0xFF27AE60)
+    val teal = Color(0xFF16A085)
+    val steel = Color(0xFF2471A3)
+    val purple = Color(0xFF7D3C98)
+    val amber = Color(0xFFB7950B)
+    val violet = Color(0xFF6C3483)
+    val bgHover = Color(0xFF3A3A3A)
+    val bgStatus = Color(0xFF161616)
+    val navBg = Color(0xFF1E3A5F)
+    val navFg = Color(0xFFC8DDF0)
     val selectBg = Color(0xFF1F6AA5)
     val sep = Color(0xFF404040)
+    /** Round initials in the list: the desktop accent colours, picked by a hash of the service name. */
+    val accents = listOf(orange, blue, green, red, teal, steel, purple, amber, violet)
     /** Strength meter: Very weak … Very strong (desktop _S_COLORS). */
     val strength = listOf(Color(0xFFE74C3C), Color(0xFFE67E22), Color(0xFFF1C40F), Color(0xFF2ECC71), Color(0xFF27AE60))
 }
@@ -42,6 +54,7 @@ private val scheme = darkColorScheme(
     surfaceContainerHighest = Palette.bgInput,
     outline = Palette.sep, outlineVariant = Palette.sep,
     error = Palette.red,
+    inverseSurface = Palette.bgPanel, inverseOnSurface = Palette.fgPrimary,
 )
 
 /**

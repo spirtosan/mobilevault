@@ -5,38 +5,61 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,15 +72,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
@@ -67,6 +92,10 @@ import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
 import com.spirtosan.mobilevault.security.MasterPasswordPolicy
 import com.spirtosan.mobilevault.security.PasswordGenerator
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /** Export files for the desktop app keep the old minimum; the master password rule is [MasterPasswordPolicy]. */
@@ -76,7 +105,11 @@ private const val MIN_EXPORT_LENGTH = 8
 fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
-        vm.message?.let { snackbar.showSnackbar(it); vm.message = null }
+        vm.message?.let { text ->
+            val error = vm.messageError
+            vm.messageShown()
+            snackbar.showSnackbar(Message(text, error))
+        }
     }
     BackHandler { if (!vm.back()) finish() }
     when (val s = vm.screen) {
@@ -108,17 +141,32 @@ private fun rememberImportPicker(vm: AppViewModel): () -> Unit {
     return { vm.externalStarted(); launcher.launch(arrayOf("*/*")) }
 }
 
+private val MODIFIED_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.ENGLISH)
+
+/** "2026-11-02T22:43:42Z" → "3 Nov 2026, 00:43" in the phone's time zone; unparsable values are shown as stored. */
+internal fun localTime(iso: String, zone: ZoneId = ZoneId.systemDefault()): String =
+    runCatching { MODIFIED_FORMAT.format(Instant.parse(iso).atZone(zone)) }.getOrDefault(iso)
+
+@Composable
+private fun ErrorText(text: String, tag: String? = null) =
+    Text(text, color = Palette.red, style = MaterialTheme.typography.bodySmall, modifier = if (tag != null) Modifier.testTag(tag) else Modifier)
+
+@Composable
+private fun WarnText(text: String, tag: String? = null) =
+    Text(text, color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = if (tag != null) Modifier.testTag(tag) else Modifier)
+
 // ── onboarding & create ──────────────────────────────────────────────────────
 @Composable
 private fun OnboardingScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val pickImport = rememberImportPicker(vm)
-    Page("Mobile Vault", snackbar, busy = vm.busy) {
-        Text("Your passwords, encrypted on this phone.", style = MaterialTheme.typography.titleMedium)
-        Muted("Nothing leaves the phone unless you export it. Backups to your own server come in a later version.")
-        Spacer(Modifier.height(8.dp))
-        Button(onClick = { vm.go(Screen.Create(null)) }, Modifier.fillMaxWidth().testTag("create")) { Text("Create new vault") }
-        OutlinedButton(onClick = pickImport, Modifier.fillMaxWidth()) { Text("Import from desktop (.vault)") }
-        OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text("Restore from server (coming soon)") }
+    Page("", snackbar, busy = vm.busy) {
+        BrandHeader("Your passwords, encrypted on this phone.")
+        PanelCard {
+            Muted("Nothing leaves the phone unless you export it. Backups to your own server come in a later version.")
+            MainButton("Create new vault", { vm.go(Screen.Create(null)) }, Modifier.fillMaxWidth().testTag("create"), Icons.Filled.Add)
+            ColorButton("Import from desktop (.vault)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FolderOpen)
+            SecondaryButton("Restore from server (coming soon)", {}, Modifier.fillMaxWidth(), enabled = false)
+        }
     }
 }
 
@@ -144,16 +192,15 @@ private fun newPasswordFields(
     if (pw.isNotEmpty() && verdict == MasterPasswordPolicy.Verdict.TOO_SHORT)
         Muted("Use at least ${MasterPasswordPolicy.MIN_LENGTH} characters.")
     // A warning, not a block (owner's choice): the vault file or a backup can be attacked offline.
-    if (verdict == MasterPasswordPolicy.Verdict.WEAK) Text(
+    if (verdict == MasterPasswordPolicy.Verdict.WEAK) WarnText(
         "Short passwords are easier to guess if someone copies the vault file or a backup. " +
-            "Fine for daily use if your phone has a screen lock.",
-        color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("weakWarning"),
+            "Fine for daily use if your phone has a screen lock.", "weakWarning",
     )
     PasswordField(confirm, onConfirm, "Repeat master password", tag = "pw2", isError = confirm.isNotEmpty() && confirm != pw)
     PlainField(hint, onHint, "Hint (optional)", tag = "hint")
     val hintProblem = if (hint.isBlank()) null else vm.hintProblem(hint, chars)
     chars.fill('\u0000')
-    if (hintProblem != null) Text(hintProblem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    if (hintProblem != null) ErrorText(hintProblem)
     Muted("The hint is stored unencrypted and shown on the unlock screen to anyone holding the phone. Never put the password itself in it.")
     CalibrationInfo(vm)
     return verdict != MasterPasswordPolicy.Verdict.TOO_SHORT && pw == confirm && hintProblem == null && vm.calibration != null && !vm.busy
@@ -173,10 +220,11 @@ private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Scree
         return
     }
     Page("Create vault", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        s.imported?.let { Muted("${it.activeEntries.size} entries from the desktop file will be in the new vault.") }
-        val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
-        Button(onClick = { keyStep = true }, enabled = ok, modifier = Modifier.fillMaxWidth().testTag("createSubmit")) {
-            Text("Next")
+        BrandHeader("Step 1 of 2: master password")
+        PanelCard {
+            s.imported?.let { Muted("${it.activeEntries.size} entries from the desktop file will be in the new vault.") }
+            val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
+            MainButton("Next", { keyStep = true }, Modifier.fillMaxWidth().testTag("createSubmit"), enabled = ok)
         }
     }
 }
@@ -185,28 +233,25 @@ private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Scree
 @Composable
 private fun RecoveryKeyStep(vm: AppViewModel, snackbar: SnackbarHostState, onBack: () -> Unit, create: (withKey: Boolean) -> Unit) {
     var confirmSkip by remember { mutableStateOf(false) }
-    Page("Recovery key", snackbar, onBack = onBack, busy = vm.busy) {
-        Text(buildAnnotatedString {
-            append("A recovery key is a 36-character code you print or write down. If you forget your master password, it is the ")
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("only") }
-            append(" way back in. Server backups won't help: they are locked with the same password.")
-        }, modifier = Modifier.testTag("recoveryChoice"))
-        Button(
-            onClick = { create(true) }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth().testTag("withKey"),
-            colors = ButtonDefaults.buttonColors(containerColor = Palette.orange, contentColor = Palette.onOrange),
-        ) { Text("Create recovery key (recommended)", fontWeight = FontWeight.Bold) }
-        TextButton(onClick = { confirmSkip = true }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth().testTag("skipKey")) {
-            Text("Skip", color = Palette.fgSecondary)
+    Page("Create vault", snackbar, onBack = onBack, busy = vm.busy) {
+        BrandHeader("Step 2 of 2: recovery key")
+        PanelCard(title = "Recovery key") {
+            Text(buildAnnotatedString {
+                append("A recovery key is a 36-character code you print or write down. If you forget your master password, it is the ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Palette.orange)) { append("only") }
+                append(" way back in. Server backups won't help: they are locked with the same password.")
+            }, color = Palette.fgPrimary, modifier = Modifier.testTag("recoveryChoice"))
+            MainButton("Create recovery key (recommended)", { create(true) }, Modifier.fillMaxWidth().testTag("withKey"),
+                Icons.Filled.Key, enabled = !vm.busy)
+            OutlineButton("Skip", { confirmSkip = true }, Palette.fgPrimary, Modifier.fillMaxWidth().testTag("skipKey"),
+                borderColor = Palette.fgSecondary, enabled = !vm.busy)
         }
     }
-    if (confirmSkip) AlertDialog(
-        onDismissRequest = { confirmSkip = false },
-        title = { Text("Skip the recovery key?") },
-        text = { Text("Without a recovery key, a forgotten master password means all passwords in this vault are lost. Skip anyway?") },
-        confirmButton = {
-            TextButton(onClick = { confirmSkip = false; create(false) }, Modifier.testTag("skipConfirm")) { Text("Skip anyway", color = Palette.red) }
-        },
-        dismissButton = { TextButton(onClick = { confirmSkip = false }) { Text("Back") } },
+    if (confirmSkip) ConfirmDialog(
+        "Skip the recovery key?",
+        "Without a recovery key, a forgotten master password means all passwords in this vault are lost. Skip anyway?",
+        confirm = "Skip anyway", confirmColor = Palette.red, dismiss = "Back", confirmTag = "skipConfirm",
+        onConfirm = { confirmSkip = false; create(false) }, onDismiss = { confirmSkip = false },
     )
 }
 
@@ -219,28 +264,29 @@ private fun KitScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     }
     var typed by remember(k) { mutableStateOf(List(3) { "" }) }
     Page("Emergency Kit", snackbar, busy = vm.busy) {
-        Text("This is your recovery key. It opens the vault if you forget the master password.", style = MaterialTheme.typography.titleSmall)
-        Card(colors = CardDefaults.cardColors(containerColor = Palette.bgPanel)) {
-            Text(
-                k.groups.chunked(3).joinToString("\n") { it.joinToString("-") },
-                fontFamily = FontFamily.Monospace, fontSize = 22.sp, lineHeight = 32.sp,
-                modifier = Modifier.padding(16.dp).testTag("recoveryKey"),
-            )
+        PanelCard(title = "Your recovery key") {
+            Text("It opens the vault if you forget the master password.", color = Palette.fgPrimary)
+            Box(Modifier.fillMaxWidth().background(Palette.bgInput, RoundedCornerShape(10.dp)).padding(16.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    k.groups.chunked(3).joinToString("\n") { it.joinToString("-") },
+                    fontFamily = FontFamily.Monospace, fontSize = 22.sp, lineHeight = 32.sp, color = Palette.orange,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.testTag("recoveryKey"),
+                )
+            }
+            Muted("Vault ID: ${k.vaultId}")
+            WarnText("Write it on paper or save the PDF and print it. Keep it offline. It is shown only now.")
+            ColorButton("Save Emergency Kit as PDF", { vm.externalStarted(); savePdf.launch("MobileVault-EmergencyKit.pdf") },
+                Palette.steel, Modifier.fillMaxWidth(), Icons.Filled.PictureAsPdf)
         }
-        Muted("Write it on paper or save the PDF and print it. Keep it offline. It is shown only now.")
-        OutlinedButton(onClick = { vm.externalStarted(); savePdf.launch("MobileVault-EmergencyKit.pdf") }, Modifier.fillMaxWidth()) {
-            Text("Save Emergency Kit as PDF")
+        PanelCard(title = "Check that you have it") {
+            Text("Type these groups:", color = Palette.fgPrimary)
+            k.challenge.forEachIndexed { i, g ->
+                // No uppercase() while typing (some keyboards repeat text when the value is rewritten); the check ignores case.
+                KeyField(typed[i], { v -> typed = typed.toMutableList().also { it[i] = v } }, "Group ${g + 1}", tag = "group:$g")
+            }
+            MainButton("Continue", { if (!vm.confirmKit(typed)) vm.fail("The groups don't match. Check what you wrote down.") },
+                Modifier.fillMaxWidth().testTag("kitDone"), enabled = typed.all { it.length == 4 } && !vm.busy)
         }
-        HorizontalDivider()
-        Text("To make sure you have it, type these groups:", style = MaterialTheme.typography.titleSmall)
-        k.challenge.forEachIndexed { i, g ->
-            // No uppercase() while typing (some keyboards repeat text when the value is rewritten); the check ignores case.
-            KeyField(typed[i], { v -> typed = typed.toMutableList().also { it[i] = v } }, "Group ${g + 1}", tag = "group:$g")
-        }
-        Button(
-            onClick = { if (!vm.confirmKit(typed)) vm.message = "The groups don't match. Check what you wrote down." },
-            enabled = typed.all { it.length == 4 } && !vm.busy, modifier = Modifier.fillMaxWidth().testTag("kitDone"),
-        ) { Text("Continue") }
     }
 }
 
@@ -250,21 +296,25 @@ private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var pw by remember { mutableStateOf("") }
     var hintShown by remember { mutableStateOf(false) }
     val submit = { if (pw.isNotEmpty()) { vm.unlock(pw.toCharArray()); pw = "" } }
-    Page("Unlock", snackbar, busy = vm.busy) {
-        PasswordField(pw, { pw = it }, "Master password", tag = "unlockPw", imeAction = ImeAction.Go, onDone = submit,
-            isError = vm.unlockError != null)
-        vm.unlockError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (vm.waitSeconds > 0) Text("Too many attempts. Try again in ${vm.waitSeconds} s.", color = Palette.orange)
-        Button(onClick = submit, enabled = !vm.busy && vm.waitSeconds == 0 && pw.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().testTag("unlock")) { Text("Unlock") }
-        if (vm.showHintButton && vm.hint != null) {
-            if (hintShown) Text("Hint: ${vm.hint}", color = Palette.orange)
-            else TextButton(onClick = { hintShown = true }) { Text("Show hint") }
+    Page("", snackbar, busy = vm.busy) {
+        BrandHeader("Vault locked")
+        PanelCard {
+            PasswordField(pw, { pw = it }, "Master password", tag = "unlockPw", imeAction = ImeAction.Go, onDone = submit,
+                isError = vm.unlockError != null)
+            vm.unlockError?.let { ErrorText(it) }
+            if (vm.waitSeconds > 0) WarnText("Too many attempts. Try again in ${vm.waitSeconds} s.")
+            MainButton("Unlock", submit, Modifier.fillMaxWidth().testTag("unlock"), Icons.Filled.LockOpen,
+                enabled = !vm.busy && vm.waitSeconds == 0 && pw.isNotEmpty())
+            if (vm.showHintButton && vm.hint != null) {
+                if (hintShown) WarnText("Hint: ${vm.hint}")
+                else TextButton(onClick = { hintShown = true }) { Text("Show hint", color = Palette.navFg) }
+            }
         }
         // Only when the file has a recovery slot: without one there is nothing to offer (no dead end).
-        if (vm.hasRecoveryKey) TextButton(onClick = { vm.recoveryError = null; vm.go(Screen.Recovery) }, Modifier.testTag("toRecovery")) {
-            Text("Forgot password? Use recovery key")
-        }
+        if (vm.hasRecoveryKey) TextButton(
+            onClick = { vm.recoveryError = null; vm.go(Screen.Recovery) },
+            modifier = Modifier.align(Alignment.CenterHorizontally).testTag("toRecovery"),
+        ) { Text("Forgot password? Use recovery key", color = Palette.navFg) }
     }
 }
 
@@ -274,17 +324,17 @@ private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var key by remember { mutableStateOf("") }
     val submit = { if (key.isNotBlank() && !vm.busy) vm.unlockWithRecoveryKey(key) }
     Page("Recovery key", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        Muted("Type or paste the 36-character key from your Emergency Kit. Dashes, spaces and case don't matter.")
-        vm.vaultId?.let { Muted("Vault ID: $it (the same ID is printed on the kit)") }
-        KeyField(key, { key = it; vm.recoveryError = null }, "Recovery key", tag = "recoveryInput",
-            isError = vm.recoveryError != null, imeAction = ImeAction.Go, onDone = submit)
-        val n = key.count { it.isLetterOrDigit() }
-        vm.recoveryError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recoveryError")) }
-            ?: Muted("$n of 36 characters")
-        Button(onClick = submit, enabled = key.isNotBlank() && !vm.busy, modifier = Modifier.fillMaxWidth().testTag("recoveryUnlock")) {
-            if (vm.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Unlock")
+        PanelCard {
+            Text("Type or paste the 36-character key from your Emergency Kit. Dashes, spaces and case don't matter.", color = Palette.fgPrimary)
+            vm.vaultId?.let { Muted("Vault ID: $it (the same ID is printed on the kit)") }
+            KeyField(key, { key = it; vm.recoveryError = null }, "Recovery key", tag = "recoveryInput",
+                isError = vm.recoveryError != null, imeAction = ImeAction.Go, onDone = submit)
+            val n = key.count { it.isLetterOrDigit() }
+            vm.recoveryError?.let { ErrorText(it, "recoveryError") } ?: Muted("$n of 36 characters")
+            if (vm.busy) CircularProgressIndicator(Modifier.size(28.dp).align(Alignment.CenterHorizontally), color = Palette.orange)
+            else MainButton("Unlock", submit, Modifier.fillMaxWidth().testTag("recoveryUnlock"), Icons.Filled.LockOpen, enabled = key.isNotBlank())
+            Muted("After unlocking you will set a new master password.")
         }
-        Muted("After unlocking you will set a new master password.")
     }
 }
 
@@ -295,16 +345,15 @@ private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, for
     var confirm by remember { mutableStateOf("") }
     var hint by remember { mutableStateOf("") }
     Page(if (forced) "Set a new master password" else "Change master password", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        if (forced) Muted("You unlocked with the recovery key. Choose a new master password; the recovery key stays valid.")
-        else PasswordField(current, { current = it }, "Current master password", tag = "currentPw")
-        val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
-        Button(
-            onClick = {
+        PanelCard {
+            if (forced) Text("You unlocked with the recovery key. Choose a new master password; the recovery key stays valid.", color = Palette.fgPrimary)
+            else PasswordField(current, { current = it }, "Current master password", tag = "currentPw")
+            val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
+            MainButton("Save", {
                 vm.setNewPassword(if (forced) null else current.toCharArray(), pw.toCharArray(), hint)
                 current = ""; pw = ""; confirm = ""
-            },
-            enabled = ok && (forced || current.isNotEmpty()), modifier = Modifier.fillMaxWidth().testTag("newPwSave"),
-        ) { Text("Save") }
+            }, Modifier.fillMaxWidth().testTag("newPwSave"), Icons.Filled.Save, enabled = ok && (forced || current.isNotEmpty()))
+        }
     }
 }
 
@@ -315,63 +364,73 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(VaultEdits.Sort.AZ) }
     val entries = payload?.let { VaultEdits.visible(it, query, sort) }.orEmpty()
+    val total = payload?.activeEntries?.size ?: 0
     Page(
-        "Mobile Vault", snackbar, busy = vm.busy, scroll = false,
+        "Mobile Vault", snackbar, busy = vm.busy, scroll = false, titleColor = Palette.orange,
         actions = {
-            IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, "Settings") }
-            IconButton(onClick = { vm.lockNow() }, Modifier.testTag("lock")) { Icon(Icons.Default.Lock, "Lock") }
+            IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Filled.Settings, "Settings", tint = Palette.fgSecondary) }
+            IconButton(onClick = { vm.lockNow() }, Modifier.testTag("lock")) { Icon(Icons.Filled.Lock, "Lock", tint = Palette.red) }
         },
         floating = {
-            FloatingActionButton(onClick = { vm.go(Screen.Edit(null)) }, Modifier.testTag("add")) { Icon(Icons.Default.Add, "Add") }
+            FloatingActionButton(onClick = { vm.go(Screen.Edit(null)) }, containerColor = Palette.green, contentColor = Color.White,
+                modifier = Modifier.testTag("add")) { Icon(Icons.Filled.Add, "Add") }
+        },
+        bottomBar = {
+            // Status line like the desktop's: entry count and the crypto in use.
+            Text(
+                "$total ${if (total == 1) "entry" else "entries"}  •  AES-256-GCM  •  Argon2id",
+                color = Palette.fgMuted, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.fillMaxWidth().background(Palette.bgStatus).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp),
+            )
         },
     ) {
-        PlainField(query, { query = it }, "Search service, username or URL", tag = "search")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Muted("Sort:")
-            ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
-        }
+        PlainField(query, { query = it }, "Search service, username or URL", tag = "search", leading = Icons.Filled.Search)
+        ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
         if (vm.kitPending) KitPendingCard(vm)
         if (entries.isEmpty()) Muted(if (query.isEmpty()) "No entries yet. Tap + to add one." else "Nothing found.")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(Modifier.background(Palette.bgPanel, RoundedCornerShape(12.dp))) {
             items(entries, key = { it.id }) { e ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Palette.bgPanel),
-                    modifier = Modifier.fillMaxWidth().clickable { vm.go(Screen.Detail(e.id)) }.testTag("entry:${e.service}"),
+                val source = remember { MutableInteractionSource() }
+                val pressed by source.collectIsPressedAsState()
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(if (pressed) Palette.selectBg else Color.Transparent, RoundedCornerShape(12.dp))
+                        .clickable(interactionSource = source, indication = null) { vm.go(Screen.Detail(e.id)) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .testTag("entry:${e.service}"),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(e.service, style = MaterialTheme.typography.titleMedium)
-                            if (e.username.isNotEmpty()) Muted(e.username)
-                        }
-                        if (e.favourite) Icon(Icons.Default.Star, "Favourite", tint = Palette.orange)
+                    Initial(e.service)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(e.service, color = Palette.fgPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (e.username.isNotEmpty()) Text(e.username, color = Palette.fgSecondary, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    if (e.favourite) Icon(Icons.Filled.Star, "Favourite", tint = Palette.orange)
                 }
+                if (e != entries.last()) HorizontalDivider(Modifier.padding(start = 64.dp), color = Palette.sep, thickness = 0.5.dp)
             }
         }
     }
 }
 
 /** The vault has a recovery key whose Emergency Kit was never confirmed (the app locked on that screen). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun KitPendingCard(vm: AppViewModel) {
     var confirm by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = Palette.bgPanel), modifier = Modifier.testTag("kitPending")) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Recovery key not confirmed", color = Palette.orange, style = MaterialTheme.typography.titleSmall)
-            Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one, or remove it.")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { confirm = true }) { Text("Create new recovery key") }
-                TextButton(onClick = { remove = true }, Modifier.testTag("kitPendingRemove")) { Text("Remove recovery key", color = Palette.red) }
-            }
+    PanelCard(Modifier.testTag("kitPending"), title = "Recovery key not confirmed") {
+        Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one, or remove it.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ColorButton("New recovery key", { confirm = true }, Palette.blue, icon = Icons.Filled.Key)
+            OutlineButton("Remove recovery key", { remove = true }, Palette.red, Modifier.testTag("kitPendingRemove"), Icons.Filled.Delete)
         }
     }
-    if (confirm) AlertDialog(
-        onDismissRequest = { confirm = false },
-        title = { Text("New recovery key?") },
-        text = { Text("Any key or Emergency Kit you saved for this vault stops working.") },
-        confirmButton = { TextButton(onClick = { confirm = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+    if (confirm) ConfirmDialog(
+        "New recovery key?", "Any key or Emergency Kit you saved for this vault stops working.",
+        confirm = "Continue", onConfirm = { confirm = false; vm.regenerateRecoveryKey() }, onDismiss = { confirm = false },
     )
     if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
 }
@@ -381,29 +440,16 @@ private fun KitPendingCard(vm: AppViewModel) {
 private fun RemoveRecoveryKeyDialogs(vm: AppViewModel, onDone: () -> Unit) {
     var pw by remember { mutableStateOf("") }
     var verified by remember { mutableStateOf(false) }
-    if (!verified) AlertDialog(
-        onDismissRequest = onDone,
-        title = { Text("Remove recovery key") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Enter your master password to continue.")
-                PasswordField(pw, { pw = it }, "Master password", tag = "removePw")
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { vm.checkPasswordForRemoval(pw.toCharArray()) { verified = true }; pw = "" },
-                enabled = pw.isNotEmpty() && !vm.busy, modifier = Modifier.testTag("removePwOk")) { Text("Continue") }
-        },
-        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
-    ) else AlertDialog(
-        onDismissRequest = onDone,
-        title = { Text("Remove the recovery key?") },
-        text = { Text("Without a recovery key, a forgotten master password means all passwords in this vault are lost. " +
-            "Any printed Emergency Kit stops working.") },
-        confirmButton = {
-            TextButton(onClick = { onDone(); vm.removeRecoveryKey() }, Modifier.testTag("removeConfirm")) { Text("Remove", color = Palette.red) }
-        },
-        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
+    if (!verified) ConfirmDialog(
+        "Remove recovery key", "Enter your master password to continue.",
+        confirm = "Continue", confirmTag = "removePwOk", confirmEnabled = pw.isNotEmpty() && !vm.busy,
+        onConfirm = { vm.checkPasswordForRemoval(pw.toCharArray()) { verified = true }; pw = "" }, onDismiss = onDone,
+    ) { PasswordField(pw, { pw = it }, "Master password", tag = "removePw") }
+    else ConfirmDialog(
+        "Remove the recovery key?",
+        "Without a recovery key, a forgotten master password means all passwords in this vault are lost. Any printed Emergency Kit stops working.",
+        confirm = "Remove", confirmColor = Palette.red, confirmTag = "removeConfirm",
+        onConfirm = { onDone(); vm.removeRecoveryKey() }, onDismiss = onDone,
     )
 }
 
@@ -414,44 +460,57 @@ private fun DetailScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: Stri
     var show by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    Page(e.service, snackbar, onBack = { vm.back() }, busy = vm.busy, actions = {
+    // No title in the top bar: the name is shown large next to the coloured initial below.
+    Page("", snackbar, onBack = { vm.back() }, busy = vm.busy, actions = {
         IconButton(onClick = { vm.toggleFavourite(e) }) {
-            Icon(Icons.Default.Star, if (e.favourite) "Unfavourite" else "Favourite", tint = if (e.favourite) Palette.orange else Palette.fgMuted)
+            Icon(if (e.favourite) Icons.Filled.Star else Icons.Filled.StarBorder, if (e.favourite) "Unfavourite" else "Favourite",
+                tint = if (e.favourite) Palette.orange else Palette.fgSecondary)
         }
     }) {
-        DetailRow("Username", e.username, onCopy = { vm.copy("Username", e.username) })
-        DetailRow("Password", if (show) e.password else "••••••••••", mono = true, onCopy = { vm.copy("Password", e.password) }) {
-            TextButton(onClick = { show = !show }) { Text(if (show) "Hide" else "Show") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Initial(e.service); Spacer(Modifier.width(12.dp))
+            Text(e.service, color = Palette.fgPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
         }
-        if (e.url.isNotEmpty()) DetailRow("URL", e.url, onCopy = {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, e.url.toUri())) }
-        })
-        if (e.notes.isNotEmpty()) { Muted("Notes"); Text(e.notes) }
-        Muted("Modified ${e.modified}")
+        DetailCard("Username", e.username) {
+            ColorButton("Copy username", { vm.copy("Username", e.username) }, Palette.teal, Modifier.testTag("copy:Username"), Icons.Filled.ContentCopy)
+        }
+        DetailCard("Password", if (show) e.password else "••••••••••", mono = true) {
+            ColorButton(if (show) "Hide" else "Show", { show = !show }, Palette.amber,
+                icon = if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility)
+            ColorButton("Copy password", { vm.copy("Password", e.password) }, Palette.steel, Modifier.testTag("copy:Password"), Icons.Filled.ContentCopy)
+        }
+        DetailCard("URL", e.url) {
+            ColorButton("Open", { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, e.url.toUri())) } },
+                Palette.purple, Modifier.testTag("copy:URL"), Icons.AutoMirrored.Filled.OpenInNew)
+            ColorButton("Copy URL", { vm.copy("URL", e.url) }, Palette.purple, icon = Icons.Filled.ContentCopy)
+        }
+        if (e.notes.isNotEmpty()) PanelCard {
+            Text("Notes", color = Palette.fgSecondary, style = MaterialTheme.typography.labelMedium)
+            Text(e.notes, color = Palette.fgPrimary)
+        }
+        Muted("Modified ${localTime(e.modified)}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.go(Screen.Edit(e.id)) }, Modifier.weight(1f)) { Text("Edit") }
-            OutlinedButton(onClick = { confirmDelete = true }, Modifier.weight(1f)) { Text("Delete", color = Palette.red) }
+            ColorButton("Edit", { vm.go(Screen.Edit(e.id)) }, Palette.blue, Modifier.weight(1f), Icons.Filled.Edit)
+            ColorButton("Delete", { confirmDelete = true }, Palette.red, Modifier.weight(1f), Icons.Filled.Delete)
         }
     }
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text("Delete ${e.service}?") },
-        text = { Text("The entry is removed from the list. Older copies stay in local snapshots.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deleteEntry(e.id) }) { Text("Delete", color = Palette.red) } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    if (confirmDelete) ConfirmDialog(
+        "Delete ${e.service}?", "The entry is removed from the list. Older copies stay in local snapshots.",
+        confirm = "Delete", confirmColor = Palette.red,
+        onConfirm = { confirmDelete = false; vm.deleteEntry(e.id) }, onDismiss = { confirmDelete = false },
     )
 }
 
+/** One field of an entry: label, value and its coloured action buttons. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailRow(label: String, value: String, mono: Boolean = false, onCopy: () -> Unit, extra: @Composable () -> Unit = {}) {
+private fun DetailCard(label: String, value: String, mono: Boolean = false, buttons: @Composable () -> Unit) {
     if (value.isEmpty()) return
-    Column {
-        Muted(label)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(value, Modifier.weight(1f), fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default)
-            extra()
-            TextButton(onClick = onCopy, Modifier.testTag("copy:$label")) { Text(if (label == "URL") "Open" else "Copy") }
-        }
+    PanelCard {
+        Text(label, color = Palette.fgSecondary, style = MaterialTheme.typography.labelMedium)
+        Text(value, color = Palette.fgPrimary, fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+            style = MaterialTheme.typography.bodyLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { buttons() }
     }
 }
 
@@ -467,59 +526,66 @@ private fun EditScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: String
     var fav by remember { mutableStateOf(orig?.favourite ?: false) }
     var showGen by remember { mutableStateOf(false) }
     Page(if (orig == null) "New entry" else "Edit ${orig.service}", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        PlainField(service, { service = it }, "Service *", tag = "service")
-        PlainField(username, { username = it }, "Username", tag = "username", keyboardType = KeyboardType.Email)
-        PasswordField(password, { password = it }, "Password *", tag = "password", mono = true)
-        StrengthMeter(password)
-        TextButton(onClick = { showGen = !showGen }) { Text(if (showGen) "Hide generator" else "Generate password") }
-        if (showGen) GeneratorPanel(vm.generator) { password = it }
-        PlainField(url, { url = it }, "URL", keyboardType = KeyboardType.Uri)
-        PlainField(notes, { notes = it }, "Notes", singleLine = false)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(fav, { fav = it }); Spacer(Modifier.padding(4.dp)); Text("Favourite")
+        PanelCard {
+            PlainField(service, { service = it }, "Service *", tag = "service")
+            PlainField(username, { username = it }, "Username", tag = "username", keyboardType = KeyboardType.Email)
+            PasswordField(password, { password = it }, "Password *", tag = "password", mono = true)
+            StrengthMeter(password)
+            if (showGen) GeneratorPanel(vm.generator) { password = it }
+            else MainButton("Generate password", { showGen = true }, Modifier.fillMaxWidth(), Icons.Filled.AutoAwesome)
+            PlainField(url, { url = it }, "URL", keyboardType = KeyboardType.Uri)
+            PlainField(notes, { notes = it }, "Notes", singleLine = false)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(fav, { fav = it }, colors = SwitchDefaults.colors(checkedTrackColor = Palette.orange, checkedThumbColor = Palette.onOrange))
+                Spacer(Modifier.width(10.dp)); Text("Favourite", color = Palette.fgPrimary)
+            }
         }
-        Button(
-            onClick = {
-                val base = orig ?: Entry(service = service.trim(), password = password)
-                vm.saveEntry(base.copy(service = service.trim(), username = username.trim(), password = password,
-                    url = url.trim(), notes = notes, favourite = fav))
-            },
-            enabled = service.isNotBlank() && password.isNotEmpty() && !vm.busy,
-            modifier = Modifier.fillMaxWidth().testTag("save"),
-        ) { Text("Save") }
+        MainButton("Save", {
+            val base = orig ?: Entry(service = service.trim(), password = password)
+            vm.saveEntry(base.copy(service = service.trim(), username = username.trim(), password = password,
+                url = url.trim(), notes = notes, favourite = fav))
+        }, Modifier.fillMaxWidth().testTag("save"), Icons.Filled.Save, enabled = service.isNotBlank() && password.isNotEmpty() && !vm.busy)
     }
 }
 
 @Composable
 private fun GeneratorPanel(gen: PasswordGenerator, onGenerated: (String) -> Unit) {
     var o by remember { mutableStateOf(PasswordGenerator.Options()) }
-    Card(colors = CardDefaults.cardColors(containerColor = Palette.bgPanel)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(o.passphrase, { o = o.copy(passphrase = it) }); Spacer(Modifier.padding(4.dp)); Text("Passphrase (words)")
-            }
-            if (o.passphrase) {
-                Text("Words: ${o.words}")
-                Slider(o.words.toFloat(), { o = o.copy(words = it.roundToInt()) },
-                    valueRange = PasswordGenerator.MIN_WORDS.toFloat()..PasswordGenerator.MAX_WORDS.toFloat(),
-                    steps = PasswordGenerator.MAX_WORDS - PasswordGenerator.MIN_WORDS - 1)
-            } else {
-                Text("Length: ${o.length}")
-                Slider(o.length.toFloat(), { o = o.copy(length = it.roundToInt()) },
-                    valueRange = PasswordGenerator.MIN_LENGTH.toFloat()..PasswordGenerator.MAX_LENGTH.toFloat())
-                CheckRow("a–z", o.lower) { o = o.copy(lower = it) }
-                CheckRow("A–Z", o.upper) { o = o.copy(upper = it) }
-                CheckRow("0–9", o.digits) { o = o.copy(digits = it) }
-                CheckRow("Symbols", o.symbols) { o = o.copy(symbols = it) }
-            }
-            Button(onClick = { onGenerated(gen.generate(o)) }, Modifier.fillMaxWidth()) { Text("Generate") }
+    val sliderColors = SliderDefaults.colors(thumbColor = Palette.orange, activeTrackColor = Palette.orange, inactiveTrackColor = Palette.bgHover)
+    Column(
+        Modifier.fillMaxWidth().background(Palette.bgInput, RoundedCornerShape(10.dp)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Password generator", color = Palette.orange, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(o.passphrase, { o = o.copy(passphrase = it) },
+                colors = SwitchDefaults.colors(checkedTrackColor = Palette.orange, checkedThumbColor = Palette.onOrange))
+            Spacer(Modifier.width(10.dp)); Text("Passphrase (words)", color = Palette.fgPrimary)
         }
+        if (o.passphrase) {
+            Text("Words: ${o.words}", color = Palette.fgPrimary)
+            Slider(o.words.toFloat(), { o = o.copy(words = it.roundToInt()) }, colors = sliderColors,
+                valueRange = PasswordGenerator.MIN_WORDS.toFloat()..PasswordGenerator.MAX_WORDS.toFloat(),
+                steps = PasswordGenerator.MAX_WORDS - PasswordGenerator.MIN_WORDS - 1)
+        } else {
+            Text("Length: ${o.length}", color = Palette.fgPrimary)
+            Slider(o.length.toFloat(), { o = o.copy(length = it.roundToInt()) }, colors = sliderColors,
+                valueRange = PasswordGenerator.MIN_LENGTH.toFloat()..PasswordGenerator.MAX_LENGTH.toFloat())
+            CheckRow("a–z", o.lower) { o = o.copy(lower = it) }
+            CheckRow("A–Z", o.upper) { o = o.copy(upper = it) }
+            CheckRow("0–9", o.digits) { o = o.copy(digits = it) }
+            CheckRow("Symbols", o.symbols) { o = o.copy(symbols = it) }
+        }
+        MainButton("Generate", { onGenerated(gen.generate(o)) }, Modifier.fillMaxWidth(), Icons.Filled.AutoAwesome)
     }
 }
 
 @Composable
 private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked, onChange); Text(label) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked, onChange, colors = CheckboxDefaults.colors(checkedColor = Palette.orange, checkmarkColor = Palette.onOrange))
+        Text(label, color = Palette.fgPrimary)
+    }
 }
 
 // ── settings, import, export, about ──────────────────────────────────────────
@@ -530,43 +596,43 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var remove by remember { mutableStateOf(false) }
     val pickImport = rememberImportPicker(vm)
     Page("Settings", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        ChoiceRow("Auto-lock after", Settings.AUTO_LOCK_CHOICES, s.autoLockMinutes, { "$it min" }) {
-            vm.updateSettings(s.copy(autoLockMinutes = it))
-        }
-        ChoiceRow("Lock when leaving the app", Settings.GRACE_CHOICES, s.backgroundGraceSeconds,
-            { if (it == 0) "Immediately" else if (it == 30) "After 30 s" else "After 1 min" }) {
-            vm.updateSettings(s.copy(backgroundGraceSeconds = it))
-        }
-        ChoiceRow("Clear copied passwords after", Settings.CLIPBOARD_CHOICES, s.clipboardClearSeconds,
-            { if (it == 0) "Never" else "$it s" }) { vm.updateSettings(s.copy(clipboardClearSeconds = it)) }
-        HorizontalDivider()
-        OutlinedButton(onClick = { vm.go(Screen.NewPassword(forced = false)) }, Modifier.fillMaxWidth()) { Text("Change master password") }
-        HorizontalDivider()
-        Text("Recovery key", style = MaterialTheme.typography.titleSmall)
-        if (vm.hasRecoveryKey) {
-            Muted("Opens the vault if you forget the master password.")
-            OutlinedButton(onClick = { confirmRegen = true }, Modifier.fillMaxWidth().testTag("newRecoveryKey")) { Text("New recovery key") }
-            OutlinedButton(onClick = { remove = true }, Modifier.fillMaxWidth().testTag("removeRecoveryKey")) {
-                Text("Remove recovery key", color = Palette.red)
+        PanelCard(title = "Security") {
+            ChoiceRow("Auto-lock after", Settings.AUTO_LOCK_CHOICES, s.autoLockMinutes, { "$it min" }) {
+                vm.updateSettings(s.copy(autoLockMinutes = it))
             }
-        } else {
-            Text("No recovery key. If you forget the master password, the vault is lost.",
-                color = Palette.orange, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("noRecoveryKey"))
-            OutlinedButton(onClick = { vm.regenerateRecoveryKey() }, Modifier.fillMaxWidth().testTag("addRecoveryKey")) {
-                Text("Create recovery key")
+            ChoiceRow("Lock when leaving the app", Settings.GRACE_CHOICES, s.backgroundGraceSeconds,
+                { if (it == 0) "Immediately" else if (it == 30) "After 30 s" else "After 1 min" }) {
+                vm.updateSettings(s.copy(backgroundGraceSeconds = it))
+            }
+            ChoiceRow("Clear copied passwords after", Settings.CLIPBOARD_CHOICES, s.clipboardClearSeconds,
+                { if (it == 0) "Never" else "$it s" }) { vm.updateSettings(s.copy(clipboardClearSeconds = it)) }
+            ColorButton("Change master password", { vm.go(Screen.NewPassword(forced = false)) }, Palette.blue,
+                Modifier.fillMaxWidth(), Icons.Filled.Password)
+        }
+        PanelCard(title = "Recovery key") {
+            if (vm.hasRecoveryKey) {
+                Muted("Opens the vault if you forget the master password.")
+                ColorButton("New recovery key", { confirmRegen = true }, Palette.blue, Modifier.fillMaxWidth().testTag("newRecoveryKey"), Icons.Filled.Key)
+                OutlineButton("Remove recovery key", { remove = true }, Palette.red, Modifier.fillMaxWidth().testTag("removeRecoveryKey"), Icons.Filled.Delete)
+            } else {
+                WarnText("No recovery key. If you forget the master password, the vault is lost.", "noRecoveryKey")
+                ColorButton("Create recovery key", { vm.regenerateRecoveryKey() }, Palette.green, Modifier.fillMaxWidth().testTag("addRecoveryKey"), Icons.Filled.Key)
             }
         }
-        HorizontalDivider()
-        OutlinedButton(onClick = pickImport, Modifier.fillMaxWidth()) { Text("Import from desktop (merge)") }
-        OutlinedButton(onClick = { vm.go(Screen.Export) }, Modifier.fillMaxWidth()) { Text("Export for desktop") }
-        OutlinedButton(onClick = { vm.go(Screen.About) }, Modifier.fillMaxWidth()) { Text("About") }
+        PanelCard(title = "Backup") {
+            Muted("Coming soon: encrypted backups to your own server.")
+        }
+        PanelCard(title = "Import / Export") {
+            ColorButton("Import from desktop (merge)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload)
+            ColorButton("Export for desktop", { vm.go(Screen.Export) }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileUpload)
+        }
+        PanelCard(title = "About") {
+            SecondaryButton("About Mobile Vault", { vm.go(Screen.About) }, Modifier.fillMaxWidth(), Icons.Filled.Info)
+        }
     }
-    if (confirmRegen) AlertDialog(
-        onDismissRequest = { confirmRegen = false },
-        title = { Text("New recovery key?") },
-        text = { Text("Your current recovery key and printed Emergency Kit stop working as soon as the new key is shown.") },
-        confirmButton = { TextButton(onClick = { confirmRegen = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
-        dismissButton = { TextButton(onClick = { confirmRegen = false }) { Text("Cancel") } },
+    if (confirmRegen) ConfirmDialog(
+        "New recovery key?", "Your current recovery key and printed Emergency Kit stop working as soon as the new key is shown.",
+        confirm = "Continue", onConfirm = { confirmRegen = false; vm.regenerateRecoveryKey() }, onDismiss = { confirmRegen = false },
     )
     if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
 }
@@ -576,9 +642,11 @@ private fun ImportPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
     var pw by remember { mutableStateOf("") }
     val submit = { vm.importDecrypt(pw.toCharArray()); pw = "" }
     Page("Import from desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        Muted("Enter the password of the desktop vault file.")
-        PasswordField(pw, { pw = it }, "Desktop vault password", imeAction = ImeAction.Go, onDone = submit)
-        Button(onClick = submit, enabled = pw.isNotEmpty() && !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("Open file") }
+        PanelCard {
+            Muted("Enter the password of the desktop vault file.")
+            PasswordField(pw, { pw = it }, "Desktop vault password", imeAction = ImeAction.Go, onDone = submit)
+            MainButton("Open file", submit, Modifier.fillMaxWidth(), Icons.Filled.FolderOpen, enabled = pw.isNotEmpty() && !vm.busy)
+        }
     }
 }
 
@@ -586,12 +654,16 @@ private fun ImportPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
 private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, count: Int) {
     val unlocked = vm.payload.collectAsState().value != null
     Page("Import from desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        Text("The file contains $count entries.", style = MaterialTheme.typography.titleMedium)
-        if (unlocked) {
-            Muted("Entries that already exist with the same service, username and password are skipped.")
-            Button(onClick = { vm.importMerge() }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("Merge into this vault") }
-        } else {
-            Button(onClick = { vm.importAsNewVault() }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("Create a new vault with them") }
+        PanelCard {
+            Text("The file contains $count entries.", color = Palette.fgPrimary, style = MaterialTheme.typography.titleMedium)
+            if (unlocked) {
+                Muted("Entries that already exist with the same service, username and password are skipped.")
+                ColorButton("Merge into this vault", { vm.importMerge() }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload,
+                    enabled = !vm.busy)
+            } else {
+                ColorButton("Create a new vault with them", { vm.importAsNewVault() }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.Add,
+                    enabled = !vm.busy)
+            }
         }
     }
 }
@@ -605,16 +677,16 @@ private fun ExportScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         if (uri != null) { vm.exportTo(uri, pw.toCharArray()); pw = ""; confirm = "" }
     }
     Page("Export for desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        Text("Creates a file the desktop app (Shu PassVault) can open.", style = MaterialTheme.typography.titleSmall)
-        Text("Notes, tags and favourites are not part of the desktop format and are left out.", color = Palette.orange)
-        Muted("Choose a password for the exported file. Anyone with the file and this password can read all entries.")
-        PasswordField(pw, { pw = it }, "Export password")
-        StrengthMeter(pw)
-        PasswordField(confirm, { confirm = it }, "Repeat export password", isError = confirm.isNotEmpty() && confirm != pw)
-        Button(
-            onClick = { vm.externalStarted(); save.launch("mobilevault-export.vault") },
-            enabled = pw.length >= MIN_EXPORT_LENGTH && pw == confirm && !vm.busy, modifier = Modifier.fillMaxWidth(),
-        ) { Text("Choose where to save") }
+        PanelCard {
+            Text("Creates a file the desktop app (Shu PassVault) can open.", color = Palette.fgPrimary)
+            WarnText("Notes, tags and favourites are not part of the desktop format and are left out.")
+            Muted("Choose a password for the exported file. Anyone with the file and this password can read all entries.")
+            PasswordField(pw, { pw = it }, "Export password")
+            StrengthMeter(pw)
+            PasswordField(confirm, { confirm = it }, "Repeat export password", isError = confirm.isNotEmpty() && confirm != pw)
+            MainButton("Choose where to save", { vm.externalStarted(); save.launch("mobilevault-export.vault") },
+                Modifier.fillMaxWidth(), Icons.Filled.Save, enabled = pw.length >= MIN_EXPORT_LENGTH && pw == confirm && !vm.busy)
+        }
     }
 }
 
@@ -622,12 +694,14 @@ private fun ExportScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 private fun AboutScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val context = LocalContext.current
     Page("About", snackbar, onBack = { vm.back() }) {
-        Text("Mobile Vault ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
-        Muted("Licensed under the GNU General Public License v3.0 or later.")
-        TextButton(onClick = {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/spirtosan/mobilevault".toUri())) }
-        }) { Text("github.com/spirtosan/mobilevault") }
-        Muted("Passphrases use the EFF Short Wordlist 1 by the Electronic Frontier Foundation (CC BY 3.0 US).")
-        Muted("Encryption: AES-256-GCM, Argon2id (own Kotlin implementation, RFC 9106), recovery key via HKDF-SHA256.")
+        BrandHeader("Version ${BuildConfig.VERSION_NAME}")
+        PanelCard {
+            Muted("Licensed under the GNU General Public License v3.0 or later.")
+            TextButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/spirtosan/mobilevault".toUri())) }
+            }) { Text("github.com/spirtosan/mobilevault", color = Palette.navFg) }
+            Muted("Passphrases use the EFF Short Wordlist 1 by the Electronic Frontier Foundation (CC BY 3.0 US).")
+            Muted("Encryption: AES-256-GCM, Argon2id (own Kotlin implementation, RFC 9106), recovery key via HKDF-SHA256.")
+        }
     }
 }

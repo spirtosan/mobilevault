@@ -11,6 +11,8 @@ import com.spirtosan.mobilevault.data.VaultRepository
 import com.spirtosan.mobilevault.security.KdfCalibration
 import com.spirtosan.mobilevault.security.PasswordGenerator
 import com.spirtosan.mobilevault.security.MasterPasswordPolicy
+import com.spirtosan.mobilevault.ui.localTime
+import java.time.ZoneId
 import com.spirtosan.mobilevault.security.PasswordStrength
 import com.spirtosan.mobilevault.security.UnlockThrottle
 import org.junit.Assert.assertArrayEquals
@@ -166,6 +168,13 @@ class SecurityHelpersTest {
         assertTrue(lvl("Tr0ub4dor&3") >= 2)
         assertEquals(4, lvl("correct-horse-battery-staple-xk"))
         assertEquals(0, PasswordStrength.score(CharArray(0)).bits)
+    }
+
+    @Test
+    fun modifiedShownInLocalTime() {
+        assertEquals("3 Nov 2026, 00:43", localTime("2026-11-02T22:43:42Z", ZoneId.of("+02:00")))
+        assertEquals("2 Nov 2026, 22:43", localTime("2026-11-02T22:43:42Z", ZoneId.of("UTC")))
+        assertEquals("not a date", localTime("not a date"))
     }
 
     @Test
