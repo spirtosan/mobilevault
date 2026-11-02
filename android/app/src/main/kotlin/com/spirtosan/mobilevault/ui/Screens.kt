@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -182,8 +184,8 @@ private fun KitScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         HorizontalDivider()
         Text("To make sure you have it, type these groups:", style = MaterialTheme.typography.titleSmall)
         k.challenge.forEachIndexed { i, g ->
-            PlainField(typed[i], { v -> typed = typed.toMutableList().also { it[i] = v.uppercase() } },
-                "Group ${g + 1}", tag = "group:$g", keyboardType = KeyboardType.Password)
+            // No uppercase() while typing (some keyboards repeat text when the value is rewritten); the check ignores case.
+            KeyField(typed[i], { v -> typed = typed.toMutableList().also { it[i] = v } }, "Group ${g + 1}", tag = "group:$g")
         }
         Button(
             onClick = { if (!vm.confirmKit(typed)) vm.message = "The groups don't match. Check what you wrote down." },
@@ -209,18 +211,27 @@ private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             if (hintShown) Text("Hint: ${vm.hint}", color = Palette.orange)
             else TextButton(onClick = { hintShown = true }) { Text("Show hint") }
         }
-        TextButton(onClick = { vm.go(Screen.Recovery) }) { Text("Forgot password? Use recovery key") }
+        TextButton(onClick = { vm.recoveryError = null; vm.go(Screen.Recovery) }, Modifier.testTag("toRecovery")) {
+            Text("Forgot password? Use recovery key")
+        }
     }
 }
 
 @Composable
 private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    // Kept while the app is locked in the background: nothing is open on this screen (see AppViewModel.onLocked).
     var key by remember { mutableStateOf("") }
+    val submit = { if (key.isNotBlank() && !vm.busy) vm.unlockWithRecoveryKey(key) }
     Page("Recovery key", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        Muted("Type the key from your Emergency Kit. Dashes and case don't matter.")
-        PlainField(key, { key = it.uppercase() }, "Recovery key", singleLine = false, keyboardType = KeyboardType.Password)
-        Button(onClick = { vm.unlockWithRecoveryKey(key) }, enabled = key.isNotBlank() && !vm.busy, modifier = Modifier.fillMaxWidth()) {
-            Text("Unlock")
+        Muted("Type or paste the 36-character key from your Emergency Kit. Dashes, spaces and case don't matter.")
+        vm.vaultId?.let { Muted("Vault ID: $it (the same ID is printed on the kit)") }
+        KeyField(key, { key = it; vm.recoveryError = null }, "Recovery key", tag = "recoveryInput",
+            isError = vm.recoveryError != null, imeAction = ImeAction.Go, onDone = submit)
+        val n = key.count { it.isLetterOrDigit() }
+        vm.recoveryError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recoveryError")) }
+            ?: Muted("$n of 36 characters")
+        Button(onClick = submit, enabled = key.isNotBlank() && !vm.busy, modifier = Modifier.fillMaxWidth().testTag("recoveryUnlock")) {
+            if (vm.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Unlock")
         }
         Muted("After unlocking you will set a new master password.")
     }
@@ -241,7 +252,7 @@ private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, for
                 vm.setNewPassword(if (forced) null else current.toCharArray(), pw.toCharArray(), hint)
                 current = ""; pw = ""; confirm = ""
             },
-            enabled = ok && (forced || current.isNotEmpty()), modifier = Modifier.fillMaxWidth(),
+            enabled = ok && (forced || current.isNotEmpty()), modifier = Modifier.fillMaxWidth().testTag("newPwSave"),
         ) { Text("Save") }
     }
 }
@@ -268,6 +279,7 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             Muted("Sort:")
             ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
         }
+        if (vm.kitPending) KitPendingCard(vm)
         if (entries.isEmpty()) Muted(if (query.isEmpty()) "No entries yet. Tap + to add one." else "Nothing found.")
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(entries, key = { it.id }) { e ->
@@ -286,6 +298,26 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             }
         }
     }
+}
+
+/** The vault has a recovery key whose Emergency Kit was never confirmed (the app locked on that screen). */
+@Composable
+private fun KitPendingCard(vm: AppViewModel) {
+    var confirm by remember { mutableStateOf(false) }
+    Card(colors = CardDefaults.cardColors(containerColor = Palette.bgPanel), modifier = Modifier.testTag("kitPending")) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Recovery key not confirmed", color = Palette.orange, style = MaterialTheme.typography.titleSmall)
+            Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one.")
+            TextButton(onClick = { confirm = true }) { Text("Create new recovery key") }
+        }
+    }
+    if (confirm) AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text("New recovery key?") },
+        text = { Text("Any key or Emergency Kit you saved for this vault stops working.") },
+        confirmButton = { TextButton(onClick = { confirm = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -429,7 +461,7 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     if (confirmRegen) AlertDialog(
         onDismissRequest = { confirmRegen = false },
         title = { Text("New recovery key?") },
-        text = { Text("Your current recovery key and printed Emergency Kit will stop working once you confirm the new one.") },
+        text = { Text("Your current recovery key and printed Emergency Kit stop working as soon as the new key is shown.") },
         confirmButton = { TextButton(onClick = { confirmRegen = false; vm.regenerateRecoveryKey() }) { Text("Continue") } },
         dismissButton = { TextButton(onClick = { confirmRegen = false }) { Text("Cancel") } },
     )

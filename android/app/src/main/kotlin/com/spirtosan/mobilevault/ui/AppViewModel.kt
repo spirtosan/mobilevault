@@ -51,8 +51,11 @@ sealed interface Screen {
     data object About : Screen
 }
 
-/** The recovery key on screen. [created] is the not-yet-saved new vault (create flow), null when regenerating. */
-class KitState(val key: RecoveryKey, val vaultId: String, val created: Pvault2.Created?, val challenge: List<Int>) {
+/**
+ * The recovery key on screen. The vault holding it is already saved and open, so a lock on the
+ * Emergency Kit screen never leaves a printed key without its vault. [newVault]: create flow.
+ */
+class KitState(val key: RecoveryKey, val vaultId: String, val newVault: Boolean, val challenge: List<Int>) {
     val display: String = key.display()
     val groups: List<String> get() = display.split("-")
 }
@@ -75,6 +78,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var hint by mutableStateOf<String?>(null); private set
     var waitSeconds by mutableIntStateOf(0); private set
     private var waitJob: Job? = null
+    /** From the (unauthenticated) header, shown on the recovery screen to compare with the Emergency Kit. */
+    var vaultId by mutableStateOf<String?>(null); private set
+    var recoveryError by mutableStateOf<String?>(null)
+
+    /** The Emergency Kit of the open vault was never confirmed (see [AppSettings.kitPending]). */
+    var kitPending by mutableStateOf(false); private set
 
     // Create / new password
     var calibration by mutableStateOf<KdfCalibration.Choice?>(null); private set
@@ -93,7 +102,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         screen = if (session.isUnlocked) Screen.VaultList else if (repo.exists()) Screen.Unlock else Screen.Onboarding
-        viewModelScope.launch { session.lockEvents.collect { onLocked() } }
+        viewModelScope.launch { session.lockEvents.collect { onLocked(it) } }
         if (screen == Screen.Unlock) prepareUnlock()
     }
 
@@ -122,9 +131,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun onLocked() {
-        kit?.let { k -> k.created?.vault?.wipe(); k.key.wipe() }
+    /**
+     * Lock events also fire when nothing is open (screen off on the Unlock or Recovery screen...).
+     * Then the screen and what was typed stay; only open or decrypted data forces a reset.
+     */
+    private fun onLocked(wasOpen: Boolean) {
+        val pending = kit != null || importBytes != null || imported != null || (screen as? Screen.Create)?.imported != null
+        if (!wasOpen && !pending) return
+        kit?.key?.wipe()
         kit = null
+        kitPending = false
         importBytes?.wipe(); importBytes = null; imported = null
         busy = false
         replace(if (repo.exists()) Screen.Unlock else Screen.Onboarding)
@@ -157,28 +173,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Pvault2.create(password, device, hint.ifBlank { null }, importedPayload ?: VaultPayload(), kdf)
         }
         password.wipe()
-        kit = KitState(created.recoveryKey, created.vault.vaultId, created, challenge())
+        // Save before the key is shown: the user may save or print the Emergency Kit and then get
+        // locked out of this screen (screen off, leaving the app). The key must still open the vault.
+        withContext(Dispatchers.IO) { repo.save(created.bytes) }
+        prefs.setKitPending(true)
+        session.open(created.vault)
+        showKit(created.recoveryKey, created.vault.vaultId, newVault = true)
+    }
+
+    private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean) {
+        kitPending = true
+        kit = KitState(key, vaultId, newVault, challenge())
         replace(Screen.EmergencyKit)
     }
 
     private fun challenge() = (0 until 9).shuffled().take(3).sorted()
 
-    /** The user re-typed the 3 groups: save the new vault (or the new recovery slot) and wipe the key. */
+    /** The user re-typed the 3 groups: the key is written down, wipe it. */
     fun confirmKit(typed: List<String>): Boolean {
         val k = kit ?: return false
         val ok = k.challenge.indices.all { i -> typed[i].trim().equals(k.groups[k.challenge[i]], ignoreCase = true) }
         if (!ok) return false
         work {
-            if (k.created != null) {
-                withContext(Dispatchers.IO) { repo.save(k.created.bytes) }
-                session.open(k.created.vault)
-            } else {
-                session.withVault(save = true) { }
-            }
+            prefs.setKitPending(false)
+            kitPending = false
             k.key.wipe()
             kit = null
             replace(Screen.VaultList)
-            message = if (k.created != null) "Vault created" else "New recovery key saved. The old one no longer works."
+            message = if (k.newVault) "Vault created" else "New recovery key saved. The old one no longer works."
         }
         return true
     }
@@ -196,7 +218,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── unlock ────────────────────────────────────────────────────────────────
     private fun prepareUnlock() {
         unlockError = null
-        hint = runCatching { Pvault2.peekHeader(repo.read()).hint }.getOrNull()
+        recoveryError = null
+        val header = runCatching { Pvault2.peekHeader(repo.read()) }.getOrNull()
+        hint = header?.hint
+        vaultId = header?.vaultId
         viewModelScope.launch {
             val (n, _) = prefs.failures()
             showHintButton = n > 0 && hint != null
@@ -239,21 +264,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun unlockWithRecoveryKey(text: String) = work {
+        recoveryError = null
         val key = try { RecoveryKey.parse(text) } catch (e: IllegalArgumentException) {
-            message = "That is not a valid recovery key (check for typos)"; return@work
+            recoveryError = e.message ?: "That is not a valid recovery key"; return@work
         }
         try {
             val v = withContext(Dispatchers.Default) { Pvault2.unlockWithRecoveryKey(repo.read(), key) }
             prefs.clearFailures()
+            prefs.setKitPending(false)                   // the user evidently has the key
             session.open(v)
             replace(Screen.NewPassword(forced = true))
         } catch (e: WrongKeyException) {
-            message = "This recovery key does not open this vault"
+            recoveryError = "This recovery key does not open this vault. Check that the Vault ID on your " +
+                "Emergency Kit matches the one above. A kit for an older vault or an old key (replaced in Settings) won't work."
         } finally { key.wipe() }
     }
 
     private suspend fun openAndShowList(v: UnlockedVault) {
         session.open(v)
+        kitPending = prefs.kitPending()
         replace(Screen.VaultList)
     }
 
@@ -276,10 +305,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } finally { current?.wipe(); newPassword.wipe() }
     }
 
+    /** Saved at once (like create): a kit saved as PDF must match the file even if the app locks before confirming. */
     fun regenerateRecoveryKey() = work {
-        val (rk, id) = session.withVault(save = false) { it.regenerateRecoveryKey() to it.vaultId }
-        kit = KitState(rk, id, null, challenge())
-        replace(Screen.EmergencyKit)
+        val (rk, id) = session.withVault(save = true) { it.regenerateRecoveryKey() to it.vaultId }
+        prefs.setKitPending(true)
+        showKit(rk, id, newVault = false)
     }
 
     // ── entries ───────────────────────────────────────────────────────────────

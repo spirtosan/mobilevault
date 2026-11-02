@@ -1,6 +1,7 @@
 package com.spirtosan.mobilevault.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -34,6 +35,7 @@ class AppSettings(private val context: Context) {
         val deviceId = stringPreferencesKey("device_id")
         val failCount = intPreferencesKey("unlock_fail_count")
         val failAt = longPreferencesKey("unlock_fail_at")
+        val kitPending = booleanPreferencesKey("kit_pending")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -69,5 +71,15 @@ class AppSettings(private val context: Context) {
 
     suspend fun clearFailures() {
         context.store.edit { it.remove(K.failCount); it.remove(K.failAt) }
+    }
+
+    /**
+     * A recovery key was saved into the vault but the user has not yet confirmed the Emergency Kit
+     * (the app was locked on that screen). The vault then reminds them to create a new key.
+     */
+    suspend fun kitPending(): Boolean = context.store.data.first()[K.kitPending] ?: false
+
+    suspend fun setKitPending(pending: Boolean) {
+        context.store.edit { if (pending) it[K.kitPending] = true else it.remove(K.kitPending) }
     }
 }

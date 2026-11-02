@@ -120,6 +120,41 @@ class CryptoTest {
         assertEquals(c.vault.vaultId, Pvault2.unlockWithPassword(raw, "brand new".toCharArray()).vaultId)
     }
 
+    /** Every way a user may type or paste the key from the Emergency Kit screen or PDF opens the vault. */
+    @Test
+    fun pvault2_recoveryKeyInputVariantsUnlock() {
+        val c = Pvault2.create("pw".toCharArray(), "d", payload = sampleEntries(), kdf = FAST)
+        val d = c.recoveryKey.display()
+        val g = d.split("-")
+        val variants = listOf(
+            d,
+            d.lowercase(),
+            d.replace("-", " "),
+            d.replace("-", ""),
+            g.take(5).joinToString("-") + "\n" + g.drop(5).joinToString("-"),          // two lines, as in the PDF
+            g.chunked(3).joinToString("\r\n") { it.joinToString("-") },               // three lines, as on screen
+            d.replace("-", "\u2013"), d.replace("-", "\u2010"), d.replace("-", "\u2212"), // dashes from a PDF copy
+            " \t$d\u00A0",
+            d.replace('0', 'O').replace('1', 'I'),
+            d.replace('0', 'o').replace('1', 'l'),
+        )
+        for (text in variants) {
+            val v = Pvault2.unlockWithRecoveryKey(c.bytes, RecoveryKey.parse(text))
+            assertEquals(c.vault.vaultId, v.vaultId, text)
+            assertEquals(2, v.payload.entries.size)
+        }
+        val e = assertThrows(IllegalArgumentException::class.java) { RecoveryKey.parse(d.dropLast(1)) }
+        assertEquals("A recovery key has 36 characters (got 35)", e.message)
+    }
+
+    /** A valid key for another vault (e.g. a kit saved for a vault that was then re-created) is rejected cleanly. */
+    @Test
+    fun pvault2_recoveryKeyOfOtherVaultRejected() {
+        val a = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
+        val b = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(b.bytes, RecoveryKey.parse(a.recoveryKey.display())) }
+    }
+
     @Test
     fun pvault2_regenerateRecoveryKeyInvalidatesOld() {
         val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
@@ -129,6 +164,10 @@ class CryptoTest {
         assertNotEquals(old, newKey)
         assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(raw, RecoveryKey.parse(old)) }
         Pvault2.unlockWithRecoveryKey(raw, RecoveryKey.parse(newKey))
+        c.vault.changePassword("pw2".toCharArray(), null, FAST)
+        val raw2 = c.vault.seal("d")
+        Pvault2.unlockWithRecoveryKey(raw2, RecoveryKey.parse(newKey.lowercase().replace("-", " ")))
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(raw2, RecoveryKey.parse(old)) }
     }
 
     @Test

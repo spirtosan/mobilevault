@@ -32,7 +32,8 @@ class RecoveryKey private constructor(private val bytes: ByteArray) {
 
         /** Parse user input. Throws IllegalArgumentException with a user-readable message. */
         fun parse(input: String): RecoveryKey {
-            val s = input.uppercase().filter { !it.isWhitespace() && it != '-' }
+            // Separators are ignored: whitespace/line breaks and any dash (a PDF copy may give '‐', '–' or '−').
+            val s = input.uppercase().filter { !it.isWhitespace() && !isDash(it) }
                 .map { when (it) { 'O' -> '0'; 'I', 'L' -> '1'; else -> it } }.joinToString("")
             require(s.length == 36) { "A recovery key has 36 characters (got ${s.length})" }
             require(s.all { it in ALPHABET }) { "The recovery key contains an invalid character" }
@@ -40,6 +41,8 @@ class RecoveryKey private constructor(private val bytes: ByteArray) {
             require(checksum(key) == s.substring(32)) { "Recovery key checksum does not match – check for a typo" }
             return RecoveryKey(key)
         }
+
+        private fun isDash(c: Char) = c == '-' || c == '\u2212' || Character.getType(c) == Character.DASH_PUNCTUATION.toInt()
 
         private fun checksum(key: ByteArray): String {
             val h = Crypto.sha256(key)

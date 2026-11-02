@@ -29,7 +29,8 @@
 - Android Studio is installed on the PC (its bundled JDK 21 was used for the tests). Java isn't on PATH.
 - Still to answer: **which phone / Android version** to test on.
 - Scope (see ANDROID_APP_SPEC.md): `app` module (Compose, minSdk 28), create/unlock/list/edit, auto-lock, clipboard clear, desktop import, FLAG_SECURE; tune Argon2 on the phone (target 0.5–1 s).
-- Then M3: backup client (pairing QR → Keystore key + CSR → `/pair`, upload queue via WorkManager, restore, health indicator), Emergency Kit, password reminders.
+- **Task 06 (2026-11-02, owner feedback):** fix recovery-key unlock, recovery key optional, master password min 6 chars (warning below 10/weak), desktop-style coloured UI. See `docs/CLAUDE_CODE_TASK_06.md`.
+- Then M3 (Task 07): backup client (pairing QR → Keystore key + CSR → `/pair`, upload queue via WorkManager, restore, health indicator), Emergency Kit, password reminders.
 
 ## How work is done
 - The cloud Claude session writes code/docs into `C:\Users\spirt\mobilevault` (no GitHub access from there). The local **Claude Code** session builds, deploys to the server and pushes to GitHub using `docs/CLAUDE_CODE_TASK_NN.md` files (01–04 done; next is 05).

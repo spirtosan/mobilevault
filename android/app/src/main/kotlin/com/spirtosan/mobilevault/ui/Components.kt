@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -129,6 +130,36 @@ fun PlainField(
         value = value, onValueChange = onChange, label = { Text(label) }, singleLine = singleLine,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, autoCorrectEnabled = false),
         modifier = modifier.fillMaxWidth().testTag(tag),
+    )
+}
+
+/**
+ * Recovery-key input: one line, ASCII keyboard with capitals, no autocorrect or suggestions.
+ * The value is never rewritten while typing; line breaks from a pasted two-line key become spaces.
+ */
+@Composable
+fun KeyField(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    tag: String = label,
+    isError: Boolean = false,
+    imeAction: ImeAction = ImeAction.Next,
+    onDone: () -> Unit = {},
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.replace('\n', ' ').replace('\r', ' ')) },
+        label = { Text(label) },
+        singleLine = true,
+        isError = isError,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Ascii, capitalization = KeyboardCapitalization.Characters,
+            autoCorrectEnabled = false, imeAction = imeAction,
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() }, onGo = { onDone() }),
+        textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+        modifier = Modifier.fillMaxWidth().testTag(tag),
     )
 }
 

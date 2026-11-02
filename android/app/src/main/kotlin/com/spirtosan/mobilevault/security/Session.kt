@@ -32,9 +32,12 @@ class Session(
     /** Decrypted entries while unlocked, null when locked. */
     val payload: StateFlow<VaultPayload?> = _payload
 
-    private val _lockEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
-    /** Fires on every lock (idle, background, screen off, manual), even when no vault was open. */
-    val lockEvents: SharedFlow<Unit> = _lockEvents
+    private val _lockEvents = MutableSharedFlow<Boolean>(extraBufferCapacity = 4)
+    /**
+     * Fires on every lock (idle, background, screen off, manual), even when no vault was open.
+     * The value tells whether a vault was open, so screens on the locked side can stay as they are.
+     */
+    val lockEvents: SharedFlow<Boolean> = _lockEvents
 
     @Volatile var lastInteraction = SystemClock.elapsedRealtime()
         private set
@@ -55,9 +58,10 @@ class Session(
 
     /** Wipe the DEK, drop decrypted entries, clear the clipboard. Safe to call from any thread. */
     fun lock() {
+        val wasOpen = _payload.value != null
         _payload.value = null
         clipboard.clear()
-        _lockEvents.tryEmit(Unit)
+        _lockEvents.tryEmit(wasOpen)
         scope.launch { mutex.withLock { vault?.wipe(); vault = null } }
     }
 
