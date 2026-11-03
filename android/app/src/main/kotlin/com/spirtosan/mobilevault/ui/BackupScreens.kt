@@ -363,7 +363,8 @@ internal fun HistoryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             SecondaryButton("Close", { vm.closePreview() }, Modifier.fillMaxWidth())
         }
         if (vm.previewNeedsPassword) PanelCard(title = "Password of that version") {
-            Muted("This version doesn't open with the current key. Enter the master password it had.")
+            Muted("This version doesn't open with the current vault key (it was saved before a key change). " +
+                "Enter the master password this version was saved with.")
             PasswordField(pw, { pw = it }, "Master password", tag = "previewPw")
             MainButton("Open", { vm.previewWithPassword(pw.toCharArray()); pw = "" }, Modifier.fillMaxWidth(), enabled = pw.isNotEmpty())
         }

@@ -59,12 +59,19 @@ object Restore {
 
     class TestResult(val ok: Boolean, val text: String)
 
-    /** Test restore: download the latest revision, decrypt it in memory, compare the entry count. Writes nothing. */
-    suspend fun testRestore(target: BackupTarget, vaultId: String, dekCopy: suspend () -> ByteArray, localEntries: Int): TestResult {
+    const val STILL_UPLOADING = "The newest version is still uploading. Try again in a minute."
+
+    /**
+     * Test restore: download the latest revision, decrypt it in memory, compare the entry count. Writes nothing.
+     * Right after a key change the server's newest file still has the old key: if it is older than [localRev],
+     * that is "still uploading", not a failure.
+     */
+    suspend fun testRestore(target: BackupTarget, vaultId: String, dekCopy: suspend () -> ByteArray, localEntries: Int, localRev: Long = 0): TestResult {
         val latest = target.latest(vaultId) ?: return TestResult(false, "There is no backup of this vault on the server yet.")
         val raw = fetch(target, vaultId, latest.rev)
         val p = preview(raw, dekCopy()) ?: return TestResult(false,
-            "The latest backup (revision ${latest.rev}) could not be decrypted with this vault's key.")
+            if (latest.rev < localRev) STILL_UPLOADING
+            else "The latest backup (revision ${latest.rev}) could not be decrypted with this vault's key.")
         val same = p.entries == localEntries
         return TestResult(true, "✓ Backup revision ${latest.rev} decrypts: ${p.entries} entries" +
             if (same) ", same as on this phone." else " (this phone has $localEntries; the newest changes may still be uploading).")

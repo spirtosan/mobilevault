@@ -93,6 +93,7 @@ import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
+import com.spirtosan.mobilevault.security.KeyChanges
 import com.spirtosan.mobilevault.security.MasterPasswordPolicy
 import com.spirtosan.mobilevault.security.PasswordGenerator
 import java.time.Instant
@@ -361,14 +362,21 @@ private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, for
     var pw by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var hint by remember { mutableStateOf("") }
+    var rotate by remember { mutableStateOf(false) }
     Page(if (forced) "Set a new master password" else "Change master password", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
             if (forced) Text("You unlocked with the recovery key. Choose a new master password; the recovery key stays valid.", color = Palette.fgPrimary)
             else if (withoutCurrent) Text("The vault is open, so you can set a new master password now, before the old one is lost.", color = Palette.fgPrimary)
             else PasswordField(current, { current = it }, "Current master password", tag = "currentPw")
             val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
+            if (!forced) {
+                // after a recovery-key unlock the kit was used, not lost: no rotation needed there
+                CheckRow("Someone may know my old password", rotate, Modifier.testTag("rotateDek")) { rotate = it }
+                Muted("Also changes the vault key, so newer versions don't open with the old password (older backups still do)." +
+                    if (vm.hasRecoveryKey) " You get a new recovery key and Emergency Kit." else "")
+            }
             MainButton("Save", {
-                vm.setNewPassword(if (forced || withoutCurrent) null else current.toCharArray(), pw.toCharArray(), hint)
+                vm.setNewPassword(if (forced || withoutCurrent) null else current.toCharArray(), pw.toCharArray(), hint, rotate = rotate && !forced)
                 current = ""; pw = ""; confirm = ""
             }, Modifier.fillMaxWidth().testTag("newPwSave"), Icons.Filled.Save, enabled = ok && (forced || withoutCurrent || current.isNotEmpty()))
         }
@@ -450,11 +458,19 @@ private fun KitPendingCard(vm: AppViewModel) {
             OutlineButton("Remove recovery key", { remove = true }, Palette.red, Modifier.testTag("kitPendingRemove"), Icons.Filled.Delete)
         }
     }
-    if (confirm) ConfirmDialog(
-        "New recovery key?", "Any key or Emergency Kit you saved for this vault stops working.",
-        confirm = "Continue", onConfirm = { confirm = false; vm.regenerateRecoveryKey() }, onDismiss = { confirm = false },
-    )
+    if (confirm) NewRecoveryKeyDialog(vm) { confirm = false }
     if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
+}
+
+/** "New recovery key" / "Create recovery key": the master password is needed to re-wrap the new vault key (DEK rotation). */
+@Composable
+internal fun NewRecoveryKeyDialog(vm: AppViewModel, adding: Boolean = false, onDone: () -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    ConfirmDialog(
+        if (adding) "Create recovery key" else "New recovery key?", KeyChanges.NEW_KEY_CONFIRM,
+        confirm = "Continue", confirmTag = "newKeyOk", confirmEnabled = pw.isNotEmpty() && !vm.busy,
+        onConfirm = { vm.newRecoveryKey(pw.toCharArray(), onDone); pw = "" }, onDismiss = onDone,
+    ) { PasswordField(pw, { pw = it }, "Master password", tag = "newKeyPw") }
 }
 
 /** "Remove recovery key": master password first, then a confirmation, then the slot is dropped and saved. */
@@ -465,13 +481,13 @@ private fun RemoveRecoveryKeyDialogs(vm: AppViewModel, onDone: () -> Unit) {
     if (!verified) ConfirmDialog(
         "Remove recovery key", "Enter your master password to continue.",
         confirm = "Continue", confirmTag = "removePwOk", confirmEnabled = pw.isNotEmpty() && !vm.busy,
-        onConfirm = { vm.checkPasswordForRemoval(pw.toCharArray()) { verified = true }; pw = "" }, onDismiss = onDone,
+        // the typed password stays until step 2: it re-wraps the new vault key
+        onConfirm = { vm.checkPasswordForRemoval(pw.toCharArray(), onWrong = { pw = "" }) { verified = true } }, onDismiss = onDone,
     ) { PasswordField(pw, { pw = it }, "Master password", tag = "removePw") }
     else ConfirmDialog(
-        "Remove the recovery key?",
-        "Without a recovery key, a forgotten master password means all passwords in this vault are lost. Any printed Emergency Kit stops working.",
+        "Remove the recovery key?", KeyChanges.REMOVE_CONFIRM,
         confirm = "Remove", confirmColor = Palette.red, confirmTag = "removeConfirm",
-        onConfirm = { onDone(); vm.removeRecoveryKey() }, onDismiss = onDone,
+        onConfirm = { val p = pw.toCharArray(); pw = ""; onDone(); vm.removeRecoveryKey(p) }, onDismiss = { pw = ""; onDone() },
     )
 }
 
@@ -603,8 +619,8 @@ private fun GeneratorPanel(gen: PasswordGenerator, onGenerated: (String) -> Unit
 }
 
 @Composable
-private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun CheckRow(label: String, checked: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked, onChange, colors = CheckboxDefaults.colors(checkedColor = Palette.orange, checkmarkColor = Palette.onOrange))
         Text(label, color = Palette.fgPrimary)
     }
@@ -615,6 +631,7 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val s by vm.settings.collectAsState()
     var confirmRegen by remember { mutableStateOf(false) }
+    var addKey by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf(false) }
     val pickImport = rememberImportPicker(vm)
     Page("Settings", snackbar, onBack = { vm.back() }, busy = vm.busy) {
@@ -639,7 +656,7 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 OutlineButton("Remove recovery key", { remove = true }, Palette.red, Modifier.fillMaxWidth().testTag("removeRecoveryKey"), Icons.Filled.Delete)
             } else {
                 WarnText("No recovery key. If you forget the master password, the vault is lost.", "noRecoveryKey")
-                ColorButton("Create recovery key", { vm.regenerateRecoveryKey() }, Palette.green, Modifier.fillMaxWidth().testTag("addRecoveryKey"), Icons.Filled.Key)
+                ColorButton("Create recovery key", { addKey = true }, Palette.green, Modifier.fillMaxWidth().testTag("addRecoveryKey"), Icons.Filled.Key)
             }
         }
         PanelCard(title = "Backup") {
@@ -655,10 +672,8 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             SecondaryButton("About Mobile Vault", { vm.go(Screen.About) }, Modifier.fillMaxWidth(), Icons.Filled.Info)
         }
     }
-    if (confirmRegen) ConfirmDialog(
-        "New recovery key?", "Your current recovery key and printed Emergency Kit stop working as soon as the new key is shown.",
-        confirm = "Continue", onConfirm = { confirmRegen = false; vm.regenerateRecoveryKey() }, onDismiss = { confirmRegen = false },
-    )
+    if (confirmRegen) NewRecoveryKeyDialog(vm) { confirmRegen = false }
+    if (addKey) NewRecoveryKeyDialog(vm, adding = true) { addKey = false }
     if (remove) RemoveRecoveryKeyDialogs(vm) { remove = false }
 }
 

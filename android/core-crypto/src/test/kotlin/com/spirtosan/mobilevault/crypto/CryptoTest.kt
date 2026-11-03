@@ -218,6 +218,76 @@ class CryptoTest {
         assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(raw2, RecoveryKey.parse(old)) }
     }
 
+    // ── DEK rotation (Task 08, code review F1) ────────────────────────────────
+    @Test
+    fun pvault2_rotateDek_newRecoveryKey() {
+        val c = Pvault2.create("pw".toCharArray(), "d", hint = "h", kdf = FAST)
+        val v = c.vault
+        v.payload = v.payload.copy(entries = listOf(Entry(service = "S", password = "p")))
+        val oldKey = c.recoveryKey!!.display()
+        val before = v.seal("d")                                    // an old copy (server rev / snapshot)
+        val oldDek = v.exportDekForBiometric()
+
+        val newKey = v.rotateDek("pw".toCharArray(), newRecoveryKey = true, kdf = FAST)!!.display()
+        val after = v.seal("d")
+        assertNotEquals(oldKey, newKey)
+        assertEquals(listOf("password", "recovery"), Pvault2.peekHeader(after).slots.map { it.type })
+        assertEquals("h", Pvault2.peekHeader(after).hint)
+        assertEquals(v.vaultId, Pvault2.peekHeader(after).vaultId)
+
+        // the body DEK really changed: the old DEK no longer opens the new file
+        assertFalse(Pvault2.verifyWithDek(after, oldDek))
+        assertTrue(Pvault2.verifyWithDek(before, oldDek))
+        val newDek = v.exportDekForBiometric()
+        assertFalse(newDek.contentEquals(oldDek))
+        assertTrue(Pvault2.verifyWithDek(after, newDek))
+        assertFalse(Pvault2.verifyWithDek(before, newDek))
+
+        // new credentials open the new file; the old recovery key doesn't
+        assertEquals("S", Pvault2.unlockWithPassword(after, "pw".toCharArray()).payload.entries.single().service)
+        assertEquals("S", Pvault2.unlockWithRecoveryKey(after, RecoveryKey.parse(newKey)).payload.entries.single().service)
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(after, RecoveryKey.parse(oldKey)) }
+        // the old file still opens with the old credentials (append-only copies can't be changed)
+        Pvault2.unlockWithRecoveryKey(before, RecoveryKey.parse(oldKey))
+        Pvault2.unlockWithPassword(before, "pw".toCharArray())
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(before, RecoveryKey.parse(newKey)) }
+    }
+
+    @Test
+    fun pvault2_rotateDek_withoutRecoveryKey() {
+        val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)
+        val v = c.vault
+        val oldKey = c.recoveryKey!!.display()
+        val before = v.seal("d")
+        assertNull(v.rotateDek("pw".toCharArray(), newRecoveryKey = false, kdf = FAST))   // "remove recovery key"
+        val after = v.seal("d")
+        assertFalse(Pvault2.peekHeader(after).hasRecoveryKey)
+        assertThrows(VaultFormatException::class.java) { Pvault2.unlockWithRecoveryKey(after, RecoveryKey.parse(oldKey)) }
+        Pvault2.unlockWithPassword(after, "pw".toCharArray())
+        Pvault2.unlockWithRecoveryKey(before, RecoveryKey.parse(oldKey))
+    }
+
+    /** "Someone may know my old password": change the password and rotate. */
+    @Test
+    fun pvault2_rotateDek_oldPasswordNoLongerOpensNewFile() {
+        val c = Pvault2.create("old".toCharArray(), "d", kdf = FAST)
+        val v = c.vault
+        val before = v.seal("d")
+        val oldDek = v.exportDekForBiometric()
+        v.changePassword("new".toCharArray(), null, FAST)
+        val rk = v.rotateDek("new".toCharArray(), newRecoveryKey = true, kdf = FAST)!!
+        val after = v.seal("d")
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithPassword(after, "old".toCharArray()) }
+        assertThrows(WrongKeyException::class.java) { Pvault2.unlockWithRecoveryKey(after, RecoveryKey.parse(c.recoveryKey!!.display())) }
+        assertFalse(Pvault2.verifyWithDek(after, oldDek))
+        Pvault2.unlockWithPassword(after, "new".toCharArray())
+        Pvault2.unlockWithRecoveryKey(after, RecoveryKey.parse(rk.display()))
+        Pvault2.unlockWithPassword(before, "old".toCharArray())
+        assertTrue(v.verifyPassword("new".toCharArray()))
+        assertFalse(v.verifyPassword("old".toCharArray()))
+        assertEquals(Pvault2.peekHeader(before).rev + 1, Pvault2.peekHeader(after).rev)    // rotation keeps the rev counter
+    }
+
     @Test
     fun pvault2_sealIncrementsRevisionAndNonce() {
         val c = Pvault2.create("pw".toCharArray(), "d", kdf = FAST)

@@ -111,7 +111,7 @@ data class VaultHeader(
  */
 class UnlockedVault internal constructor(
     header: VaultHeader,
-    private val dek: ByteArray,
+    private var dek: ByteArray,
     var payload: VaultPayload,
 ) {
     var header: VaultHeader = header
@@ -148,6 +148,30 @@ class UnlockedVault internal constructor(
         val rk = RecoveryKey.generate()
         val slot = Pvault2.recoverySlot(rk, dek, header.vaultId)
         header = header.copy(slots = header.slots.filter { it.type != "recovery" } + slot)
+        return rk
+    }
+
+    /**
+     * DEK rotation (docs/VAULT_FORMAT_V2.md): a new random DEK replaces (and wipes) the old one, with a
+     * new password slot for [password] (fresh salt) and, if [newRecoveryKey], a new recovery slot whose
+     * key is returned. Without it the vault has no recovery slot afterwards. All old slots are dropped.
+     * The hint, vault id and rev stay. Call [seal] afterwards: the body is then encrypted with the new DEK.
+     *
+     * Older copies of the file (server revisions, snapshots) still open with the old credentials and
+     * the old DEK; files sealed after the rotation don't.
+     */
+    fun rotateDek(password: CharArray, newRecoveryKey: Boolean, kdf: Argon2Params = Argon2Params()): RecoveryKey? {
+        checkOpen()
+        val newDek = Crypto.random(Crypto.KEY_LEN)
+        val rk = if (newRecoveryKey) RecoveryKey.generate() else null
+        val slots = try {
+            listOfNotNull(Pvault2.passwordSlot(password, newDek, header.vaultId, kdf), rk?.let { Pvault2.recoverySlot(it, newDek, header.vaultId) })
+        } catch (e: Throwable) {
+            newDek.wipe(); rk?.wipe(); throw e
+        }
+        dek.wipe()
+        dek = newDek
+        header = header.copy(slots = slots)
         return rk
     }
 

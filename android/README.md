@@ -59,6 +59,8 @@ vault.wipe()                                                  // on lock
 // Recovery key management (then seal + save)
 val newKey = vault.regenerateRecoveryKey()                    // replaces, or adds if there is none
 vault.removeRecoveryKey()
+// The app uses DEK rotation instead (Task 08): new DEK + new slots, old copies keep their old keys
+val key = vault.rotateDek(password, newRecoveryKey = true, kdf)   // or false: no recovery slot afterwards
 
 // Import from desktop
 val payload = Pvault1.decrypt(password, desktopFileBytes)

@@ -3,13 +3,22 @@
 Goals: a recoverable master password (recovery key), an authenticated header, entry IDs for sync, versioning for backups, and full read support for PVAULT1.
 
 ## Envelope encryption
-- **DEK**: a random 32-byte data key. It encrypts the payload and never changes when the password changes.
+- **DEK**: a random 32-byte data key. It encrypts the payload and doesn't change on a plain password change. It changes only on a **DEK rotation** (below).
 - **Key slots**: the DEK is wrapped (AES-256-GCM) by one or more KEKs:
   - `password` slot: KEK = Argon2id(master password, salt)
   - `recovery` slot: KEK = HKDF-SHA256(recovery key, salt, info "PVAULT2 recovery"). The recovery key is **160 random bits**, shown once on a printable **Emergency Kit** as 32 Crockford-Base32 characters + a 4-character checksum, in 9 groups (`XXXX-XXXX-…`, 44 characters; O/I/L are read as 0/1/1). A slow KDF isn't needed because the key is fully random.
   - `biometric` slot: this one is **not stored in the file**. It's stored locally, with the DEK wrapped by an Android Keystore key that requires `BiometricPrompt` (StrongBox if available).
 - Changing the password only rewrites the password slot. Losing the password means unlocking with the recovery key and setting a new password.
 - The `recovery` slot is **optional** (owner's choice, 2026-11-02). A vault created with "Skip" has only the `password` slot; one can be added or removed later (Settings → Recovery key). Readers look slots up by `type` and must not assume a recovery slot exists. Without it, a forgotten password cannot be recovered by anyone.
+
+## DEK rotation (Task 08)
+Re-wrapping the same DEK is not enough when a credential may be compromised: every older copy of the file (server revisions, local snapshots, desktop exports) still has the old slots, and the old DEK would also decrypt every **future** revision. So these actions **rotate** the DEK (`UnlockedVault.rotateDek(password, newRecoveryKey, kdf)`):
+- a new recovery key (Settings, "Create recovery key", the yearly "make a new kit" card); the master password is asked first,
+- removing the recovery key,
+- changing the master password with "Someone may know my old password" ticked (a vault with a recovery key also gets a new one).
+
+Rotation creates a new random DEK, wipes the old one, writes a new `password` slot (fresh salt) and, if asked, a new `recovery` slot; all old slots are dropped. `vault_id`, `rev` and `hint` stay; the next `seal()` encrypts the body with the new DEK. The format doesn't change (still v2).
+Consequences: older files still open with the credentials and DEK they were saved with (unavoidable with append-only backups), but they only contain old data. The local fingerprint slot wraps the old DEK, so the app turns fingerprint unlock off after a rotation. Version history asks for "the master password this version was saved with" when a revision doesn't open with the current DEK.
 
 ## Binary layout
 ```

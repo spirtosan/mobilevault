@@ -35,6 +35,7 @@ import com.spirtosan.mobilevault.data.VaultEdits
 import com.spirtosan.mobilevault.security.BiometricPolicy
 import com.spirtosan.mobilevault.security.BiometricVault
 import com.spirtosan.mobilevault.security.KdfCalibration
+import com.spirtosan.mobilevault.security.KeyChanges
 import com.spirtosan.mobilevault.security.PasswordGenerator
 import com.spirtosan.mobilevault.security.Reminders
 import com.spirtosan.mobilevault.security.UnlockThrottle
@@ -82,7 +83,7 @@ enum class PairPurpose { SETTINGS, RESTORE, CREATE }
  * The recovery key on screen. The vault holding it is already saved and open, so a lock on the
  * Emergency Kit screen never leaves a printed key without its vault. [newVault]: create flow.
  */
-class KitState(val key: RecoveryKey, val vaultId: String, val newVault: Boolean, val challenge: List<Int>) {
+class KitState(val key: RecoveryKey, val vaultId: String, val newVault: Boolean, val challenge: List<Int>, val doneText: String = "Vault created") {
     val display: String = key.display()
     val groups: List<String> get() = display.split("-")
 }
@@ -222,9 +223,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** After a new vault: offer the backup server (step 3) unless this phone is already connected. */
     private fun afterCreate(): Screen = if (a.backup.isPaired) Screen.VaultList.also { a.queueBackup() } else Screen.BackupStep
 
-    private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean) {
+    private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean, doneText: String = "Vault created") {
         kitPending = true
-        kit = KitState(key, vaultId, newVault, challenge())
+        kit = KitState(key, vaultId, newVault, challenge(), doneText)
         replace(Screen.EmergencyKit)
     }
 
@@ -242,7 +243,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             k.key.wipe()
             kit = null
             replace(if (k.newVault) afterCreate() else Screen.VaultList)
-            message = if (k.newVault) "Vault created" else "New recovery key saved. The old one no longer works."
+            message = k.doneText
         }
         return true
     }
@@ -347,47 +348,86 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── password & recovery key changes ───────────────────────────────────────
-    /** [current] is null after a recovery-key unlock (forced flow). */
-    fun setNewPassword(current: CharArray?, newPassword: CharArray, hint: String) = work {
-        val kdf = (calibration ?: withContext(Dispatchers.Default) {
-            KdfCalibration.choose(KdfCalibration::measureOnDevice)
-        }.also { calibration = it }).params
+    private suspend fun kdfParams() = (calibration ?: withContext(Dispatchers.Default) {
+        KdfCalibration.choose(KdfCalibration::measureOnDevice)
+    }.also { calibration = it }).params
+
+    /**
+     * [current] is null after a recovery-key unlock (forced flow). [rotate]: "Someone may know my old
+     * password", the vault key changes too (and a vault with a recovery key gets a new one + kit).
+     */
+    fun setNewPassword(current: CharArray?, newPassword: CharArray, hint: String, rotate: Boolean = false) = work {
+        val kdf = kdfParams()
         try {
             if (current != null) {
                 val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(current) } }
                 if (!ok) { fail("Current password is wrong"); return@work }
             }
-            withContext(Dispatchers.Default) {
-                session.withVault(save = true) { it.changePassword(newPassword, hint.ifBlank { null }, kdf) }
+            val (rk, id) = withContext(Dispatchers.Default) {
+                session.withVault(save = true) { KeyChanges.changePassword(it, newPassword, hint.ifBlank { null }, kdf, rotate) to it.vaultId }
             }
             passwordTyped()
-            replace(Screen.VaultList)
-            message = "Master password changed"
+            if (!rotate) { replace(Screen.VaultList); message = "Master password changed"; return@work }
+            val done = KeyChanges.PASSWORD_ROTATED_DONE + afterRotation()
+            if (rk != null) {
+                prefs.setKitPending(true)
+                showKit(rk, id, newVault = false, doneText = done)
+            } else { replace(Screen.VaultList); message = done }
         } finally { current?.wipe(); newPassword.wipe() }
     }
 
-    /** Saved at once (like create): a kit saved as PDF must match the file even if the app locks before confirming. */
-    fun regenerateRecoveryKey() = work {
-        val (rk, id) = session.withVault(save = true) { it.regenerateRecoveryKey() to it.vaultId }
-        prefs.setKitPending(true)
-        hasRecoveryKey = true
-        showKit(rk, id, newVault = false)
+    /**
+     * After a DEK rotation: the fingerprint slot wraps the old DEK, so it is turned off.
+     * Returns the note for the success message (empty if fingerprint unlock wasn't on).
+     */
+    private fun afterRotation(): String {
+        val wasOn = bio.isEnabled()
+        disableBiometric(quiet = true)
+        return if (wasOn) " " + KeyChanges.BIOMETRIC_OFF else ""
     }
 
-    /** Step 1 of "Remove recovery key": check the master password, then [onOk] shows the confirm dialog. */
-    fun checkPasswordForRemoval(password: CharArray, onOk: () -> Unit) = work {
+    /**
+     * New recovery key (or the first one): check the master password, rotate the DEK, save, show the kit.
+     * Saved at once (like create): a kit saved as PDF must match the file even if the app locks before confirming.
+     * [onDone] runs when the password was right (closes the dialog).
+     */
+    fun newRecoveryKey(password: CharArray, onDone: () -> Unit = {}) = work {
+        val kdf = kdfParams()
         try {
-            val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
-            if (ok) onOk() else fail("Master password is wrong")
+            val (rk, id) = try {
+                withContext(Dispatchers.Default) {
+                    session.withVault(save = true) { KeyChanges.newRecoveryKey(it, password, kdf) to it.vaultId }
+                }
+            } catch (e: KeyChanges.WrongPassword) { fail("Master password is wrong"); return@work }
+            onDone()
+            passwordTyped()
+            val done = KeyChanges.NEW_KEY_DONE + afterRotation()
+            prefs.setKitPending(true)
+            hasRecoveryKey = true
+            showKit(rk, id, newVault = false, doneText = done)
         } finally { password.wipe() }
     }
 
-    fun removeRecoveryKey() = work {
-        session.withVault(save = true) { it.removeRecoveryKey() }
-        prefs.setKitPending(false)
-        kitPending = false
-        hasRecoveryKey = false
-        message = "Recovery key removed. Only the master password opens this vault now."
+    /** Step 1 of "Remove recovery key": check the master password, then [onOk] shows the confirm dialog. */
+    fun checkPasswordForRemoval(password: CharArray, onWrong: () -> Unit = {}, onOk: () -> Unit) = work {
+        try {
+            val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
+            if (ok) onOk() else { onWrong(); fail("Master password is wrong") }
+        } finally { password.wipe() }
+    }
+
+    /** Step 2: drop the recovery slot and rotate the DEK (the password is checked again: it re-wraps the new DEK). */
+    fun removeRecoveryKey(password: CharArray) = work {
+        val kdf = kdfParams()
+        try {
+            try {
+                withContext(Dispatchers.Default) { session.withVault(save = true) { KeyChanges.removeRecoveryKey(it, password, kdf) } }
+            } catch (e: KeyChanges.WrongPassword) { fail("Master password is wrong"); return@work }
+            prefs.setKitPending(false)
+            kitPending = false
+            hasRecoveryKey = false
+            message = KeyChanges.REMOVED_DONE + afterRotation()
+        } finally { password.wipe() }
     }
 
     // ── entries ───────────────────────────────────────────────────────────────
@@ -676,7 +716,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val id = session.read { it.vaultId } ?: return@work
         val local = session.payload.value?.activeEntries?.size ?: 0
         try {
-            val r = Restore.testRestore(target(), id, { session.read { it.exportDekForBiometric() } ?: ByteArray(32) }, local)
+            val r = Restore.testRestore(target(), id, { session.read { it.exportDekForBiometric() } ?: ByteArray(32) }, local, session.rev.value)
             if (r.ok) {
                 a.backup.updateStatus { it.copy(testRestoreAt = System.currentTimeMillis(), testRestoreText = r.text) }
                 message = "Test restore OK"
@@ -813,7 +853,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun kitStillSafe() = viewModelScope.launch { prefs.setKitChecked(reminderNow()); message = "Thanks. Next reminder in a year." }
 
-    fun kitMakeNew() { viewModelScope.launch { prefs.setKitChecked(reminderNow()) }; regenerateRecoveryKey() }
 
     /** Debug builds: move the reminder clock forward by [days] (0 = reset). */
     fun debugClockForward(days: Int) = viewModelScope.launch {

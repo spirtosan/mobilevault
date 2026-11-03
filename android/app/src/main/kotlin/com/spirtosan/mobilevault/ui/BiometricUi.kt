@@ -165,13 +165,15 @@ internal fun PracticePasswordCard(vm: AppViewModel) {
 @Composable
 internal fun KitCheckCard(vm: AppViewModel) {
     if (!Reminders.kitDue(vm.reminderTimes, vm.hasRecoveryKey, vm.reminderNow()) || vm.kitPending) return
+    var makeNew by remember { mutableStateOf(false) }
     PanelCard(Modifier.testTag("kitCheckCard"), title = "Is your Emergency Kit still safe?") {
         Muted("Check that the printed recovery key is still where you keep it, and that nobody else has seen it.")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ColorButton("Yes", { vm.kitStillSafe() }, Palette.green, Modifier.testTag("kitSafe"))
-            ColorButton("Make a new key", { vm.kitMakeNew() }, Palette.blue, Modifier.testTag("kitNew"), Icons.Filled.Key)
+            ColorButton("Make a new key", { makeNew = true }, Palette.blue, Modifier.testTag("kitNew"), Icons.Filled.Key)
         }
     }
+    if (makeNew) NewRecoveryKeyDialog(vm) { makeNew = false }
 }
 
 /** Debug builds only: fast-forward the reminder clock (practice card, kit card, fingerprint N days, test restore). */

@@ -35,7 +35,8 @@ object EmergencyKitPdf {
                 "Keep this page offline, e.g. printed and stored with your important documents.",
                 "Anyone with this key AND your vault file can open the vault. Do not photograph it or",
                 "store it in cloud drives or email. If it is lost or exposed, create a new key in",
-                "Settings > Regenerate recovery key (the old key then stops working).",
+                "Settings > New recovery key. Newer versions of the vault then no longer open with the",
+                "old key; older backups still do, but they only contain old data.",
             ).forEach { c.drawText(it, 50f, y, body); y += 17 }
             c.drawText("github.com/spirtosan/mobilevault", 50f, 800f, small)
             doc.finishPage(page)
