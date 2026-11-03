@@ -30,6 +30,7 @@ Base URL: `https://vault.<DOMAIN>/api/v1` (a separate subdomain, so client-certi
 | Method | Path | Result |
 |---|---|---|
 | `PUT` | `/vaults/{vault_id}/revs/{rev}` | Body = PVAULT2 file, header `X-Content-SHA256`. **201** stored; **409** this rev already exists (never overwrites); **413** > 5 MB; **422** bad magic, hash mismatch, or `vault_id`/`rev` not matching the file header |
+| `GET` | `/vaults` | JSON `{"vaults": [{vault_id, latest_rev, latest_time, size, device, revisions}]}`, newest first. All vaults (single owner). Used by the restore screen so the Vault ID doesn't have to be typed (Task 08) |
 | `GET` | `/vaults/{vault_id}/revs` | JSON list `[{rev, size, sha256, received}]` |
 | `GET` | `/vaults/{vault_id}/revs/{rev}` | the file |
 | `GET` | `/vaults/{vault_id}/latest` | metadata of the highest rev (used for conflict detection) |

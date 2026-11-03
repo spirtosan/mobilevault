@@ -10,7 +10,18 @@ It uses only the Python 3.10+ standard library plus the `openssl` CLI. No pip pa
 - A lost phone is blocked with `mvault-admin revoke <name>`.
 - Hourly mirror to a second disk (root-owned, so the service user can't touch it). Daily retention: the last 30 revisions plus the newest one per week for 52 weeks.
 
-API reference: `docs/BACKUP_AND_RECOVERY.md`. Installation: `docs/CLAUDE_CODE_TASK_03.md`.
+## API (prefix `/api/v1`)
+| Method | Path | Auth | |
+|---|---|---|---|
+| `GET` | `/health` | none | `{"ok": true, "version": "1"}` |
+| `POST` | `/pair` | one-time code | `{code, csr_pem}` → `{device, cert_pem, ca_pem, token}` |
+| `GET` | `/vaults` | cert + token | `{"vaults": [{vault_id, latest_rev, latest_time, size, device, revisions}]}`, newest first, all vaults (single owner) |
+| `PUT` | `/vaults/{id}/revs/{rev}` | cert + token | store a PVAULT2 file; 201, or 409 if the rev exists |
+| `GET` | `/vaults/{id}/revs` | cert + token | `{vault_id, revs: [{rev, size, sha256, received, device}]}` |
+| `GET` | `/vaults/{id}/revs/{rev}` | cert + token | the file, with `X-Content-SHA256` |
+| `GET` | `/vaults/{id}/latest` | cert + token | metadata of the highest rev |
+
+There is no `DELETE` (405). Full description: `docs/BACKUP_AND_RECOVERY.md`. Installation: `docs/CLAUDE_CODE_TASK_03.md`.
 
 ## Layout
 | Path | |

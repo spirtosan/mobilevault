@@ -32,7 +32,10 @@ class FakeTarget : BackupTarget {
     private fun meta(rev: Long, b: ByteArray) = RemoteRev(rev, b.size.toLong(), HttpBackupTarget.sha256Hex(b), "2026-11-03T00:00:00Z")
     private fun check() { failWith?.let { throw it } }
 
+    /** null: behave like a server older than Task 08 (404 on GET /vaults). */
+    var vaultList: List<com.spirtosan.mobilevault.backup.RemoteVault>? = emptyList()
     override suspend fun health() = check()
+    override suspend fun vaults() = run { check(); vaultList ?: throw BackupErrors.fromHttp(404, "{\"error\": \"not found\"}") }
     override suspend fun upload(vaultId: String, rev: Long, bytes: ByteArray): UploadResult {
         check(); uploads++
         if (files.containsKey(rev)) return UploadResult.Exists

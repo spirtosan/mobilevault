@@ -205,27 +205,55 @@ def list_revisions(cfg, vault_id):
     except FileNotFoundError:
         return out
     for n in names:
-        m = re.match(r"^r(\d{16})\.pvault$", n)
-        if not m:
-            continue
-        rev = int(m.group(1))
-        meta = None
-        try:
-            with open(os.path.join(vdir, n + ".json"), encoding="utf-8") as f:
-                meta = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-        if not meta:
-            p = os.path.join(vdir, n)
-            with open(p, "rb") as f:
-                data = f.read()
-            st = os.stat(p)
-            meta = {"rev": rev, "size": len(data), "sha256": sha256_hex(data),
-                    "received": datetime.fromtimestamp(st.st_mtime, timezone.utc)
-                    .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    "device": None}
-        out.append(meta)
+        m = REV_FILE_RE.match(n)
+        if m:
+            out.append(_rev_meta(vdir, n, int(m.group(1))))
     out.sort(key=lambda m: m["rev"])
+    return out
+
+
+REV_FILE_RE = re.compile(r"^r(\d{16})\.pvault$")
+
+
+def _rev_meta(vdir, name, rev):
+    """Metadata of one stored revision: the sidecar JSON, or rebuilt from the blob if it is missing."""
+    try:
+        with open(os.path.join(vdir, name + ".json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        if meta:
+            return meta
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    p = os.path.join(vdir, name)
+    with open(p, "rb") as f:
+        data = f.read()
+    st = os.stat(p)
+    return {"rev": rev, "size": len(data), "sha256": sha256_hex(data),
+            "received": datetime.fromtimestamp(st.st_mtime, timezone.utc)
+            .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "device": None}
+
+
+def list_vaults(cfg):
+    """One row per vault that has at least one revision, newest upload first.
+    Reads only the metadata of each vault's highest rev."""
+    out = []
+    try:
+        names = os.listdir(cfg["data_dir"])
+    except FileNotFoundError:
+        return out
+    for vid in names:
+        vdir = os.path.join(cfg["data_dir"], vid)
+        if not UUID_RE.match(vid) or not os.path.isdir(vdir):
+            continue
+        revs = [(int(m.group(1)), n) for n in os.listdir(vdir) for m in [REV_FILE_RE.match(n)] if m]
+        if not revs:
+            continue
+        rev, name = max(revs)
+        meta = _rev_meta(vdir, name, rev)
+        out.append({"vault_id": vid, "latest_rev": rev, "latest_time": meta.get("received"),
+                    "size": meta.get("size"), "device": meta.get("device"), "revisions": len(revs)})
+    out.sort(key=lambda v: (v["latest_time"] or "", v["latest_rev"]), reverse=True)
     return out
 
 

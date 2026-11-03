@@ -16,6 +16,7 @@ import com.spirtosan.mobilevault.MobileVaultApp
 import com.spirtosan.mobilevault.backup.BackupException
 import com.spirtosan.mobilevault.backup.HttpBackupTarget
 import com.spirtosan.mobilevault.backup.RemoteRev
+import com.spirtosan.mobilevault.backup.RemoteVault
 import com.spirtosan.mobilevault.backup.Restore
 import com.spirtosan.mobilevault.backup.PairingPayload
 import com.spirtosan.mobilevault.crypto.Entry
@@ -157,6 +158,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         when (s) {
             is Screen.Create, is Screen.NewPassword -> calibrate()
             Screen.Unlock -> prepareUnlock()
+            Screen.RestoreStart -> loadRemoteVaults()
             else -> {}
         }
     }
@@ -476,6 +478,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var connectionText by mutableStateOf<String?>(null); private set
     var connectionError by mutableStateOf(false); private set
 
+    /** Vault ID of the vault on this phone (Settings → Backup shows it with a copy button). */
+    fun currentVaultId(): String? = localVaultId()
+
     private fun localVaultId(): String? = if (repo.exists()) runCatching { Pvault2.peekHeader(repo.read()).vaultId }.getOrNull() else null
 
     /** From the QR scanner or the paste field. */
@@ -528,6 +533,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var remoteRevs by mutableStateOf<List<RemoteRev>>(emptyList()); private set
     var restoreError by mutableStateOf<String?>(null)
     var restoreVaultId by mutableStateOf<String?>(null); private set
+    /** Restore start: the vaults on the server; null while loading or if the server can't list them. */
+    var remoteVaults by mutableStateOf<List<RemoteVault>?>(null); private set
+    /** Restore start: show the "Vault ID" field (old server, list failed, or the user asked for it). */
+    var manualVaultId by mutableStateOf(false)
     /** Header of the downloaded file waiting for the password (restore on a new phone). */
     var restoreHeader by mutableStateOf<VaultHeader?>(null); private set
     private var restoreRaw: ByteArray? = null
@@ -543,6 +552,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun startRestore() {
         restoreError = null
         if (a.backup.isPaired && !a.backup.status.value.disconnected) go(Screen.RestoreStart) else go(Screen.Pairing(PairPurpose.RESTORE))
+    }
+
+    /** Restore start: ask the server which vaults it has. A 404 (server older than Task 08) falls back to typing the ID. */
+    fun loadRemoteVaults() = work {
+        restoreError = null
+        remoteVaults = null
+        manualVaultId = false
+        try {
+            val list = Restore.vaultsOrNull(target())
+            remoteVaults = list
+            if (list == null || list.isEmpty()) manualVaultId = true
+        } catch (e: BackupException) {
+            restoreError = e.text
+            manualVaultId = true
+        }
     }
 
     fun loadRestoreRevisions(vaultIdText: String) = work {

@@ -107,6 +107,34 @@ class MvaultTest(unittest.TestCase):
         mode = os.stat(os.path.join(self.cfg["data_dir"], vid, C.rev_filename(1))).st_mode & 0o777
         self.assertEqual(mode, 0o440)
 
+    def test_list_vaults(self):
+        self.assertEqual(self.req("GET", "/vaults")[0], 403)                           # no cert
+        self.assertEqual(self.req("GET", "/vaults", headers=self.auth(token="wrong"))[0], 401)
+        old, new = str(uuid.uuid4()), str(uuid.uuid4())
+        self.assertEqual(self.put(old, 1, make_blob(old, 1))[0], 201)
+        self.assertEqual(self.put(old, 2, make_blob(old, 2, b"y" * 100))[0], 201)
+        self.assertEqual(self.put(new, 1, make_blob(new, 1))[0], 201)
+        # make "old" look older, and drop one sidecar to exercise the rebuild path
+        vdir = os.path.join(self.cfg["data_dir"], old)
+        os.chmod(os.path.join(vdir, C.rev_filename(2) + ".json"), 0o640)
+        os.unlink(os.path.join(vdir, C.rev_filename(2) + ".json"))
+        os.utime(os.path.join(vdir, C.rev_filename(2)), (1e9, 1e9))
+        os.makedirs(os.path.join(self.cfg["data_dir"], str(uuid.uuid4())))            # empty vault dir: skipped
+        os.makedirs(os.path.join(self.cfg["data_dir"], "lost+found"), exist_ok=True)  # not a vault id: skipped
+        st, data, _ = self.req("GET", "/vaults", headers=self.auth())
+        self.assertEqual(st, 200)
+        rows = json.loads(data)["vaults"]
+        ids = [r["vault_id"] for r in rows]
+        self.assertLess(ids.index(new), ids.index(old))
+        times = [r["latest_time"] for r in rows]
+        self.assertEqual(times, sorted(times, reverse=True))
+        o = rows[ids.index(old)]
+        self.assertEqual((o["latest_rev"], o["size"], o["revisions"]), (2, len(make_blob(old, 2, b"y" * 100)), 2))
+        self.assertTrue(o["latest_time"].startswith("2001-"))
+        n = rows[ids.index(new)]
+        self.assertEqual((n["latest_rev"], n["device"]), (1, "phone1"))
+        self.assertEqual(set(n), {"vault_id", "latest_rev", "latest_time", "size", "device", "revisions"})
+
     def test_no_overwrite(self):
         vid = str(uuid.uuid4())
         self.assertEqual(self.put(vid, 1, make_blob(vid, 1))[0], 201)

@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Restore
@@ -52,6 +54,8 @@ import com.journeyapps.barcodescanner.ScanOptions
 import com.spirtosan.mobilevault.backup.BackupErrors
 import com.spirtosan.mobilevault.backup.BackupHealth
 import com.spirtosan.mobilevault.backup.RemoteRev
+import com.spirtosan.mobilevault.backup.RemoteVault
+import com.spirtosan.mobilevault.backup.Restore
 import com.spirtosan.mobilevault.backup.TestRestoreReminder
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -100,6 +104,12 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             Text("Server: ${cfg.host}", color = Palette.fgPrimary, modifier = Modifier.testTag("backupHost"))
             Text("This phone: ${cfg.device}", color = Palette.fgPrimary, modifier = Modifier.testTag("backupDevice"))
             Muted("Connected ${localTimeMs(cfg.pairedAt)}. Key in Android Keystore" + if (cfg.strongBox) " (StrongBox)." else ".")
+            remember { vm.currentVaultId() }?.let { id ->
+                Text("Vault ID", color = Palette.fgSecondary, style = MaterialTheme.typography.labelMedium)
+                Text(id, color = Palette.fgPrimary, modifier = Modifier.testTag("vaultId"))
+                ColorButton("Copy Vault ID", { vm.copy("Vault ID", id) }, Palette.teal, Modifier.testTag("copyVaultId"), Icons.Filled.ContentCopy)
+                Muted("Needed only if a new phone can't list the backups on the server. Keep it with your Emergency Kit.")
+            }
             if (cfg.pins.isEmpty()) WarnText("No server pins: the connection relies on public certificate authorities only.")
             ColorButton("Test connection", { vm.testConnection() }, Palette.blue, Modifier.fillMaxWidth().testTag("testConnection"),
                 Icons.Filled.NetworkCheck, enabled = !vm.busy)
@@ -236,19 +246,50 @@ internal fun BackupStepScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     )
 }
 
-/** Restore on a new phone, step 1: which vault (the server lists revisions per Vault ID). */
+/** Restore on a new phone, step 1: which vault. The server lists them (`GET /vaults`); typing the Vault ID is the fallback. */
 @Composable
 internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var id by remember { mutableStateOf("") }
     Page("Restore from backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
-        PanelCard {
-            Text("Enter the Vault ID of the vault to restore.", color = Palette.fgPrimary)
-            Muted("It is printed on your Emergency Kit. On the server,  mvault-admin stats  lists the IDs of all backed-up vaults.")
+        val list = vm.remoteVaults
+        if (list != null && list.isNotEmpty()) {
+            Muted("Vaults backed up on your server, newest first. Tap the one to restore.")
+            list.forEach { v -> VaultRow(v) { vm.loadRestoreRevisions(v.vaultId) } }
+        } else if (list != null) {
+            WarnText("The server has no backups yet.", "noRemoteVaults")
+        }
+        if (!vm.manualVaultId) {
+            vm.restoreError?.let { ErrorText(it, "restoreError") }
+            if (list != null) OutlineButton("Enter Vault ID manually", { vm.manualVaultId = true; vm.restoreError = null }, Palette.fgSecondary,
+                Modifier.fillMaxWidth().testTag("restoreManual"), Icons.Filled.Keyboard)
+        } else PanelCard(title = "Vault ID") {
+            if (list == null) Muted("This server can't list its vaults. Enter the Vault ID instead.")
+            Muted("It is printed on your Emergency Kit and shown in Settings → Backup. On the server,  mvault-admin stats  lists the IDs of all backed-up vaults.")
             PlainField(id, { id = it; vm.restoreError = null }, "Vault ID", tag = "restoreVaultId", keyboardType = KeyboardType.Uri)
             vm.restoreError?.let { ErrorText(it, "restoreError") }
             MainButton("Show backups", { vm.loadRestoreRevisions(id) }, Modifier.fillMaxWidth().testTag("restoreLoad"),
                 Icons.Filled.CloudDownload, enabled = id.isNotBlank() && !vm.busy)
         }
+    }
+}
+
+/** One vault on the server: "Vault 1a2b…, revision 42" / "3 Nov 2026, 10:00 · from xiaomi". */
+@Composable
+private fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Palette.bgPanel, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp).testTag("vault:${v.vaultId}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("${Restore.shortId(v.vaultId)}, revision ${v.latestRev}", color = Palette.fgPrimary, fontWeight = FontWeight.Bold)
+            Muted(listOfNotNull(
+                v.latestTime.takeIf { it.isNotEmpty() }?.let { localTime(it) },
+                v.device.takeIf { it.isNotEmpty() }?.let { "from $it" },
+                v.revisions.takeIf { it > 0 }?.let { if (it == 1) "1 version" else "$it versions" },
+            ).joinToString(" · "))
+        }
+        Icon(Icons.Filled.CloudDownload, null, tint = Palette.fgSecondary)
     }
 }
 

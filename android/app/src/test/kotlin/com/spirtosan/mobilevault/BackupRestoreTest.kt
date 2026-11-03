@@ -4,6 +4,7 @@ import com.spirtosan.mobilevault.backup.BackupException
 import com.spirtosan.mobilevault.backup.BackupStatus
 import com.spirtosan.mobilevault.backup.BackupUploader
 import com.spirtosan.mobilevault.backup.BackupUploader.Outcome
+import com.spirtosan.mobilevault.backup.RemoteVault
 import com.spirtosan.mobilevault.backup.Restore
 import com.spirtosan.mobilevault.backup.TestRestoreReminder
 import com.spirtosan.mobilevault.crypto.Argon2Params
@@ -12,6 +13,7 @@ import com.spirtosan.mobilevault.crypto.Pvault2
 import com.spirtosan.mobilevault.crypto.UnlockedVault
 import com.spirtosan.mobilevault.crypto.VaultPayload
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -126,4 +128,34 @@ class BackupRestoreTest {
         assertFalse(TestRestoreReminder.due(false, backed, 0, 0, now = 99 * d))
     }
 
+
+    // ── GET /vaults (Task 08) ──
+    @Test fun vaultListIsParsedNewestFirst() {
+        val json = kotlinx.serialization.json.Json.parseToJsonElement("""{"vaults": [
+            {"vault_id": "11111111-1111-4111-8111-111111111111", "latest_rev": 4, "latest_time": "2026-11-01T10:00:00Z", "size": 900, "device": "xiaomi", "revisions": 4},
+            {"vault_id": "22222222-2222-4222-8222-222222222222", "latest_rev": 42, "latest_time": "2026-11-03T09:00:00Z", "size": 1200, "device": null},
+            {"latest_rev": 1},
+            "junk"
+        ]}""").jsonObject
+        val list = RemoteVault.listFromJson(json)
+        assertEquals(listOf(42L, 4L), list.map { it.latestRev })
+        assertEquals("", list[0].device)
+        assertEquals(0, list[0].revisions)
+        assertEquals("xiaomi", list[1].device)
+        assertEquals("Vault 22222222…", Restore.shortId(list[0].vaultId))
+        try { RemoteVault.listFromJson(kotlinx.serialization.json.Json.parseToJsonElement("{}").jsonObject); fail() }
+        catch (e: IllegalArgumentException) { }
+    }
+
+    @Test fun vaultListFallsBackToManualIdOnOldServer() = runBlocking {
+        val v = RemoteVault("11111111-1111-4111-8111-111111111111", 3, "2026-11-03T09:00:00Z", 10, "x", 3)
+        target.vaultList = listOf(v)
+        assertEquals(listOf(v), Restore.vaultsOrNull(target))
+        target.vaultList = null                                       // 404: server older than Task 08
+        assertNull(Restore.vaultsOrNull(target))
+        target.failWith = BackupException(BackupException.Kind.DISCONNECTED, "x", 403)
+        try { Restore.vaultsOrNull(target); fail("403 must not look like an old server") } catch (e: BackupException) {
+            assertEquals(BackupException.Kind.DISCONNECTED, e.kind)
+        }
+    }
 }

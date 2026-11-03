@@ -14,6 +14,17 @@ object Restore {
     fun normalizeVaultId(text: String): String? =
         Regex("[0-9a-fA-F-]{36}").find(text.trim())?.value?.lowercase()?.takeIf { UUID_RE.matches(it) }
 
+    /**
+     * The vaults on the server for the restore screen, or null if the server can't list them
+     * (older than Task 08: 404). Then the screen asks for the Vault ID instead.
+     */
+    suspend fun vaultsOrNull(target: BackupTarget): List<RemoteVault>? = try { target.vaults() } catch (e: BackupException) {
+        if (e.kind == BackupException.Kind.NOT_FOUND) null else throw e
+    }
+
+    /** "Vault 1a2b3c4d…" */
+    fun shortId(vaultId: String) = "Vault " + vaultId.take(8) + "…"
+
     fun newestFirst(revs: List<RemoteRev>) = revs.sortedByDescending { it.rev }
 
     /** Download a revision and make sure it is the file we asked for (PVAULT2, same vault_id and rev). */

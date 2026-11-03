@@ -1,6 +1,6 @@
 """End-to-end smoke test against a deployed mvault server, through nginx/TLS/mTLS.
 Acts like a phone: makes an EC key + CSR, pairs with a one-time code, uploads a fake
-PVAULT2 file, lists, downloads, checks that overwrite is refused.
+PVAULT2 file, lists vaults and revisions, downloads, checks that overwrite is refused.
 
 Usage (on any machine with python3 + openssl):
   1. on the server:  sudo mvault-admin pair smoketest      → note the code
@@ -79,6 +79,11 @@ def main():
     check("delete refused", call("DELETE", f"/vaults/{vid}/revs/1", None, auth)[0], 405)
     st, data = call("GET", f"/vaults/{vid}/revs", None, auth)
     check("list", (st, [m["rev"] for m in json.loads(data)["revs"]] if st == 200 else None), (200, [1]))
+    st, data = call("GET", "/vaults", None, auth)
+    row = next((v for v in json.loads(data)["vaults"] if v["vault_id"] == vid), None) if st == 200 else None
+    check("vault list has the test vault", (st, row and row["latest_rev"], row and row["device"]),
+          (200, 1, j["device"]))
+    check("vault list without client cert refused", call("GET", "/vaults", None, auth, with_cert=False)[0], 403)
     st, data = call("GET", f"/vaults/{vid}/revs/1", None, auth)
     check("download matches", (st, data == blob), (200, True))
     check("wrong token refused", call("GET", f"/vaults/{vid}/revs", None,

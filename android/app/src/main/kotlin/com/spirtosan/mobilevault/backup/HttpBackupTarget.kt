@@ -55,6 +55,13 @@ class HttpBackupTarget(
         }
     }
 
+    override suspend fun vaults(): List<RemoteVault> = call(get("/vaults")).use { r ->
+        val o = json(r)
+        try { RemoteVault.listFromJson(o) } catch (e: IllegalArgumentException) {
+            throw BackupException(BackupException.Kind.SERVER, "Unexpected answer from the server.")
+        }
+    }
+
     override suspend fun list(vaultId: String): List<RemoteRev> =
         call(get("/vaults/$vaultId/revs")).use { r ->
             (json(r)["revs"] as? JsonArray ?: throw BackupException(BackupException.Kind.SERVER, "Unexpected answer from the server."))

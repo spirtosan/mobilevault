@@ -10,6 +10,7 @@ values sent by the client):
 Endpoints (prefix /api/v1):
     GET  /health
     POST /pair                               (no client cert needed; one-time code)
+    GET  /vaults                             (cert + bearer token; all vaults, newest first)
     PUT  /vaults/{id}/revs/{rev}             (cert + bearer token)
     GET  /vaults/{id}/revs                   (cert + bearer token)
     GET  /vaults/{id}/revs/{rev}             (cert + bearer token)
@@ -190,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/health":
             return self._json(200, {"ok": True, "version": VERSION})
         device = self._auth()
+        if p == "/vaults":
+            return self._json(200, {"vaults": C.list_vaults(self.cfg)})
         m = ROUTE_REVS.match(p)
         if m:
             vid = self._vid(m.group(1))
