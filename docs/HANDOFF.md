@@ -2,6 +2,8 @@
 
 _Last updated: 2026-11-03. Read this first, then `docs/STATUS.md`._
 
+> **Permanent rule (owner, 2026-11-03; copy it into every future task's Rules):** **The release app (`com.spirtosan.mobilevault`) holds the owner's real vault.** Never open, unlock, read, back up, restore over, clear, uninstall, re-pair or disconnect it, and never take screenshots of it. The only exception is installing a newer release build **over** it (same signing key, `adb install -r`), which keeps its data. All tests use the **debug app** (`com.spirtosan.mobilevault.debug`) with test data only. The old test password is retired; don't use it on the release app. On the server, the device `xiaomi` (the release app) stays active and untouched, and the owner's real vault `274cdb88-…` is never deleted, trashed, restored or read.
+
 ## 1. What this project is
 **Mobile Vault** is an Android password manager for one owner (non-commercial, GPL-3.0). It is based on the desktop app **Shu PassVault** (`C:\Users\spirt\passvault`, Python/Tkinter; copy in `reference/desktop-passvault/`).
 The main goal is **maximum protection against losing passwords**: strong offline encryption, an (optional, recommended) recovery key for a forgotten master password, password reminders, and versioned zero-knowledge backups to the owner's **own Ubuntu server**.
@@ -22,7 +24,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–10 are done; the next new one is 11.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–11 are done; the next new one is 12.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
@@ -51,7 +53,7 @@ App MVP on the Xiaomi; Task 06 fixed the recovery-key bug, made the recovery key
 Pairing (QR or pasted text → Keystore EC P-256 key → CSR → `POST /pair`), OkHttp 4.12 with mTLS + pins, WorkManager uploads with sha256 verification, health chip, restore (Vault ID → revisions → password/recovery key), version history (rollback as new rev), test restore, fingerprint unlock, practice-password and Emergency Kit cards. Owner checks still open: see STATUS.md. Only the Xiaomi is tested (owner, 2026-11-03).
 
 ### Done: Task 08 (2026-11-03): fixes from `docs/CODE_REVIEW_01.md`
-`GET /api/v1/vaults` + vault list on the restore screen; **DEK rotation** on new/removed recovery key and (optional) password change; TLS retry; create/test-restore guards; no pinless pairing in release; client-cert expiry warning; `mvault-admin list` shows cert expiry. Live tests that need the test vault password are still open (STATUS.md).
+`GET /api/v1/vaults` + vault list on the restore screen; **DEK rotation** on new/removed recovery key and (optional) password change; TLS retry; create/test-restore guards; no pinless pairing in release; client-cert expiry warning; `mvault-admin list` shows cert expiry. Live tests done 2026-11-03 (STATUS.md).
 
 ### Done: Task 09 (2026-11-03): simpler Emergency Kit step + one-click pairing
 Kit step: "Save Emergency Kit as PDF" or "I wrote it down" (no typing test); Settings → Security → "Check my recovery key". Pairing a phone: double-click `tools/windows/Pair phone.cmd` on the owner's PC (SSH login in `%USERPROFILE%\mobilevault-secrets\pair-phone.json`), scan the full-screen QR, Test connection. Fingerprint checks skipped by the owner's decision (reopen only if a problem shows up).
@@ -60,7 +62,7 @@ Kit step: "Save Emergency Kit as PDF" or "I wrote it down" (no typing test); Set
 One vault with optional sections (`sec` + `settings.sections`, PVAULT2 v2 unchanged otherwise); chips on the list only when sections exist; Settings → Sections; Settings → Import a file (desktop or Mobile Vault) or from the backup server into a chosen section. Screenshots in `docs/screenshots/task10/`.
 
 ### Done with the owner (2026-11-03): release app switched to the real vault
-The release app now holds the owner's real vault (sections Personal / Work, new master password, rotated key, new Emergency Kit). **It is off-limits for tests from now on**: only install newer release builds over it. Details and a found import-preview bug: STATUS.md.
+The release app now holds the owner's real vault (sections Personal / Work, new master password, rotated key, new Emergency Kit). **It is off-limits from now on** (permanent rule at the top): only install newer release builds over it. Details and a found import-preview bug: STATUS.md.
 
 ### Next
 Task 11 (not started). Owner check: HyperOS battery settings.
