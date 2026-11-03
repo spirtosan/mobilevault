@@ -364,6 +364,24 @@ class CryptoTest {
         assertEquals("2026-01-01T00:00:00Z", back.created)
     }
 
+    /** Task 10: the optional `sec` field. Written only when set, so entries without a section keep their old JSON. */
+    @Test
+    fun pvault2_sectionFieldRoundTrip() {
+        val withSec = Entry.fromJson(Json.parseToJsonElement(
+            """{"s":"A","p":"b","sec":"11111111-1111-4111-8111-111111111111","future":1}""").jsonObject, "2026-01-01T00:00:00Z")
+        val without = Entry.fromJson(Json.parseToJsonElement("""{"s":"B","p":"c"}""").jsonObject, "2026-01-01T00:00:00Z")
+        assertEquals("11111111-1111-4111-8111-111111111111", withSec.section)
+        assertEquals("", without.section)
+        assertFalse("sec" in withSec.extra)
+        assertFalse("sec" in without.toJson())
+        assertEquals("11111111-1111-4111-8111-111111111111", (withSec.toJson()["sec"] as JsonPrimitive).content)
+        val c = Pvault2.create("pw".toCharArray(), "d", payload = VaultPayload(listOf(withSec, without)), kdf = FAST)
+        val back = Pvault2.unlockWithPassword(c.bytes, "pw".toCharArray()).payload.entries
+        assertEquals(listOf(withSec.section, ""), back.map { it.section })
+        assertEquals(withSec.extra, back[0].extra)
+        assertFalse("sec" in back[0].copy(section = "").toJson())          // "no section" removes the key again
+    }
+
     @Test
     fun pvault2_lockedVaultCannotSeal() {
         val v = Pvault2.create("pw".toCharArray(), "d", kdf = FAST).vault

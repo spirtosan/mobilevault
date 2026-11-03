@@ -2,8 +2,9 @@
 Used to cross-check the Android implementation and as a starting point for desktop support.
 
     python3 pvault2.py create <out> <password> [--hint H] [--m 65536 --t 3 --p 1]   → prints recovery key
-    python3 pvault2.py open   <file> <password>                                     → prints payload JSON
-    python3 pvault2.py recover <file> <RECOVERY-KEY>                                → prints payload JSON
+    python3 pvault2.py open   <file> <password> [--list]                            → prints payload JSON
+    python3 pvault2.py recover <file> <RECOVERY-KEY> [--list]                       → prints payload JSON
+    --list prints one line per active entry instead: section | service | username (Task 10 sections)
 
 Requires: pip install cryptography argon2-cffi
 """
@@ -128,8 +129,8 @@ def main():
     c = sub.add_parser("create"); c.add_argument("out"); c.add_argument("password"); c.add_argument("--hint")
     c.add_argument("--m", type=int, default=65536); c.add_argument("--t", type=int, default=3); c.add_argument("--p", type=int, default=4)
     c.add_argument("--payload", help="JSON file with {entries:[...]}")
-    o = sub.add_parser("open"); o.add_argument("file"); o.add_argument("password")
-    r = sub.add_parser("recover"); r.add_argument("file"); r.add_argument("key")
+    o = sub.add_parser("open"); o.add_argument("file"); o.add_argument("password"); o.add_argument("--list", action="store_true")
+    r = sub.add_parser("recover"); r.add_argument("file"); r.add_argument("key"); r.add_argument("--list", action="store_true")
     a = ap.parse_args()
     if a.cmd == "create":
         payload = json.load(open(a.payload, encoding="utf-8")) if a.payload else {"entries": [], "settings": {}}
@@ -143,8 +144,19 @@ def main():
         else:
             key = rk_parse(a.key)
             _, _, payload = unlock(raw, lambda k: recovery_kek(key, k), "recovery")
-        json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
-        print()
+        if a.list:
+            list_entries(payload)
+        else:
+            json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+            print()
+
+
+def list_entries(payload):
+    """One line per active entry: section name ("-" = no section or unknown id) | service | username."""
+    names = {s.get("id"): s.get("name", "") for s in (payload.get("settings") or {}).get("sections", []) if isinstance(s, dict)}
+    for e in payload.get("entries", []):
+        if not e.get("deleted"):
+            print("%s | %s | %s" % (names.get(e.get("sec"), "-") or "-", e.get("s", ""), e.get("u", "")))
 
 
 if __name__ == "__main__":

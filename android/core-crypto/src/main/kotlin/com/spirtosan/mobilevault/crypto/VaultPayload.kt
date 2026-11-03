@@ -37,6 +37,11 @@ data class Entry(
     val modified: String = created,
     /** Tombstone: kept ~90 days so a merge does not resurrect deleted entries. */
     val deleted: Boolean = false,
+    /**
+     * Section id (Task 10, JSON key `sec`), "" = no section. The section list with names and order is in
+     * `settings.sections`; an id that isn't listed there is shown as "no section". Not the same as [tags].
+     */
+    val section: String = "",
     val extra: Map<String, JsonElement> = emptyMap(),
 ) {
     override fun toString() = "Entry(id=$id, service=$service, username=$username, password=***)"
@@ -48,10 +53,11 @@ data class Entry(
         put("tags", JsonArray(tags.map { JsonPrimitive(it) })); put("fav", JsonPrimitive(favourite))
         put("created", JsonPrimitive(created)); put("modified", JsonPrimitive(modified))
         put("deleted", JsonPrimitive(deleted))
+        if (section.isNotEmpty()) put("sec", JsonPrimitive(section)) else remove("sec")
     })
 
     internal companion object {
-        private val KNOWN = setOf("id", "s", "u", "p", "url", "notes", "tags", "fav", "created", "modified", "deleted")
+        private val KNOWN = setOf("id", "s", "u", "p", "url", "notes", "tags", "fav", "created", "modified", "deleted", "sec")
 
         fun fromJson(o: JsonObject, defaultTime: String): Entry {
             fun str(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull ?: ""
@@ -65,6 +71,7 @@ data class Entry(
                 created = created,
                 modified = str("modified").ifEmpty { created },
                 deleted = (o["deleted"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                section = str("sec"),
                 extra = o.filterKeys { it !in KNOWN },
             )
         }

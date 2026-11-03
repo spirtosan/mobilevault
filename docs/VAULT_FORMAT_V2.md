@@ -60,14 +60,17 @@ Implementations: Android uses `core-crypto`'s own pure-Kotlin Argon2id (`Argon2.
   "entries": [
     {"id": "uuid", "s": "GitHub", "u": "me", "p": "secret", "url": "https://…",
      "notes": "", "tags": [], "fav": false,
-     "created": "ISO-8601", "modified": "ISO-8601", "deleted": false}
+     "created": "ISO-8601", "modified": "ISO-8601", "deleted": false,
+     "sec": "section-uuid"}
   ],
-  "settings": {"clipboard_timeout": 30, "autolock_seconds": 300}
+  "settings": {"clipboard_timeout": 30, "autolock_seconds": 300,
+               "sections": [{"id": "section-uuid", "name": "Work"}]}
 }
 ```
 - The `s/u/p/url` keys are kept from v1, so converting is trivial.
 - `deleted: true` marks a tombstone, kept for 90 days so that a merge doesn't bring deleted entries back.
 - `rev` goes up by 1 on every save. Merging between devices uses `id` and `modified`.
+- **Sections (Task 10, optional):** one vault can be split into sections (e.g. Personal / Work). `settings.sections` is the ordered list `{"id", "name"}` (so empty sections and their order survive). An entry's `sec` is the id of its section; it is written only when set, so a vault without sections looks exactly as before. An entry whose `sec` isn't in the list is shown under "No section". `sec` is separate from `tags` (free-form labels). Readers that don't know sections keep `sec` and `settings.sections` as unknown fields (every reader must preserve unknown keys). The desktop format (PVAULT1) has no sections: exporting one section gives a separate desktop file.
 
 ## Compatibility
 - Mobile **reads** PVAULT1 (import from desktop). Importing converts to PVAULT2, gives every entry a UUID, and sets timestamps to the import time.
