@@ -4,7 +4,7 @@ A small **append-only** HTTPS backup API for the Mobile Vault Android app. It ru
 It uses only the Python 3.10+ standard library plus the `openssl` CLI. No pip packages.
 
 - The server only ever stores **already-encrypted** PVAULT2 files. It checks their structure but never decrypts them.
-- **No delete, no overwrite.** Each revision is stored once (`link()` on a new name). Old revisions are pruned only by the retention timer.
+- **No delete, no overwrite.** Each revision is stored once (`link()` on a new name). Old revisions are pruned only by the retention timer. Whole vaults can be moved to a 30-day trash only by root (`mvault-admin delete-vault`).
 - **Two factors per phone:** an mTLS client certificate (private CA; the key is created in the phone's Android Keystore) **and** a bearer token bound to that certificate.
 - Pairing uses a QR code from `mvault-admin pair <name>`: single use, 10 minutes, attempt-limited. The QR also carries the server's SPKI pins.
 - A lost phone is blocked with `mvault-admin revoke <name>`.
@@ -31,12 +31,25 @@ There is no `DELETE` (405). Full description: `docs/BACKUP_AND_RECOVERY.md`. Ins
 
 Fallback: SSH to the server, `mvault-admin pair <name>`, paste the `Payload:` line into the app ("Or paste the pairing text").
 
+## Delete a vault (root only, recoverable for 30 days)
+The API has no delete. Only root on the server can remove a whole vault, and only into a trash:
+
+| Command | |
+|---|---|
+| `mvault-admin stats` | all vaults: revisions, size, newest rev, last device and all devices that uploaded |
+| `mvault-admin delete-vault <vault-id>` | shows the vault, asks you to type the first 8 characters of its ID (`--yes` skips this, for scripts/tests), then **moves** it to `<data_dir>/../trash/<vault-id>-<UTC time>/` (root-only, 0700). The API no longer lists or serves it; a later upload with the same ID starts fresh |
+| `mvault-admin undelete-vault <vault-id> [--entry NAME]` | moves the newest (or the named) trash copy back; refused if the vault exists again |
+| `mvault-admin trash` | trashed vaults with deletion date and purge date |
+| `mvault-admin purge-trash [--dry-run]` | permanently deletes trash entries older than 30 days; run as root by `mvault-retention.service` after the retention step (logs each entry to the journal) |
+
+The trash directory can be changed with `"trash_dir"` in the config. The hourly mirror never deletes, so it keeps a copy too.
+
 ## Layout
 | Path | |
 |---|---|
 | `mvault/common.py` | config, PVAULT2 header check, atomic append-only storage |
 | `mvault/server.py` | HTTP service (loopback only) |
-| `mvault/admin.py` | `init-ca`, `pair`, `list` (incl. each client certificate's expiry), `revoke`, `retention`, `stats` |
+| `mvault/admin.py` | `init-ca`, `pair`, `list` (incl. each client certificate's expiry), `revoke`, `retention`, `stats`, `delete-vault`, `undelete-vault`, `trash`, `purge-trash` (see below) |
 | `tests/test_mvault.py` | unit/integration tests: `cd server && python3 -m unittest -v` |
 | `tools/mvault_smoke.py` | end-to-end test through nginx/TLS, acting as a phone |
 | `deploy/` | systemd units, nginx site + rate limit, fail2ban filter/jail, config example (placeholders `<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`) |

@@ -13,6 +13,7 @@ import threading
 import unittest
 import urllib.parse
 import uuid
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection
 
@@ -208,6 +209,86 @@ class MvaultTest(unittest.TestCase):
         self.assertLessEqual(len(kept), 30 + 53)
         self.assertNotIn(1, kept)                                    # older than a year
         self.assertEqual(admin.plan_retention([], now), set())
+
+    # ── Task 11: delete-vault / undelete-vault / trash / purge ──────────────
+    def admin_run(self, fn, ns, answer=None):
+        out = io.StringIO()
+        code = 0
+        with contextlib.redirect_stdout(out), mock.patch("builtins.input", return_value=answer or ""):
+            try:
+                fn(self.cfg, ns)
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else 1
+        return code, out.getvalue()
+
+    def api_has(self, vid):
+        st, data, _ = self.req("GET", "/vaults", headers=self.auth())
+        listed = any(v["vault_id"] == vid for v in json.loads(data)["vaults"])
+        return (listed, self.req("GET", f"/vaults/{vid}/revs/1", headers=self.auth())[0],
+                self.req("GET", f"/vaults/{vid}/latest", headers=self.auth())[0])
+
+    def test_delete_undelete_vault(self):
+        vid = str(uuid.uuid4())
+        for r in (1, 2):
+            self.assertEqual(self.put(vid, r, make_blob(vid, r))[0], 201)
+        self.assertEqual(self.api_has(vid), (True, 200, 200))
+        # wrong confirmation → nothing happens
+        code, out = self.admin_run(admin.cmd_delete_vault, argparse.Namespace(vault_id=vid, yes=False), "deadbeef")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing changed", out)
+        self.assertIn("revisions:   2", out)
+        self.assertEqual(self.api_has(vid), (True, 200, 200))
+        # right confirmation → moved, hidden from the API
+        code, out = self.admin_run(admin.cmd_delete_vault, argparse.Namespace(vault_id=vid, yes=False), vid[:8])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.api_has(vid), (False, 404, 404))
+        self.assertTrue(any(n.startswith(vid) for n in os.listdir(C.trash_dir(self.cfg))))
+        self.assertEqual(os.stat(C.trash_dir(self.cfg)).st_mode & 0o777, 0o700)
+        self.assertIn(vid, self.admin_run(admin.cmd_trash, None)[1])
+        # undelete → visible again with both revs
+        code, out = self.admin_run(admin.cmd_undelete_vault, argparse.Namespace(vault_id=vid, entry=None))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.api_has(vid), (True, 200, 200))
+        st, data, _ = self.req("GET", f"/vaults/{vid}/revs", headers=self.auth())
+        self.assertEqual([m["rev"] for m in json.loads(data)["revs"]], [1, 2])
+
+    def test_upload_after_delete_starts_fresh_and_undelete_refuses(self):
+        vid = str(uuid.uuid4())
+        self.assertEqual(self.put(vid, 1, make_blob(vid, 1))[0], 201)
+        self.assertEqual(self.put(vid, 2, make_blob(vid, 2))[0], 201)
+        self.assertEqual(self.admin_run(admin.cmd_delete_vault, argparse.Namespace(vault_id=vid, yes=True))[0], 0)
+        self.assertEqual(self.put(vid, 5, make_blob(vid, 5))[0], 201)
+        st, data, _ = self.req("GET", f"/vaults/{vid}/revs", headers=self.auth())
+        self.assertEqual([m["rev"] for m in json.loads(data)["revs"]], [5])          # no resurrection
+        code, out = self.admin_run(admin.cmd_undelete_vault, argparse.Namespace(vault_id=vid, entry=None))
+        self.assertEqual(code, 1)
+        self.assertIn("exists again", out)
+        self.assertIn("--entry", out)
+
+    def test_delete_unknown_or_bad_id(self):
+        self.assertNotEqual(self.admin_run(admin.cmd_delete_vault,
+                                           argparse.Namespace(vault_id=str(uuid.uuid4()), yes=True))[0], 0)
+        self.assertNotEqual(self.admin_run(admin.cmd_delete_vault,
+                                           argparse.Namespace(vault_id="../state", yes=True))[0], 0)
+
+    def test_purge_trash_after_30_days(self):
+        vid = str(uuid.uuid4())
+        self.assertEqual(self.put(vid, 1, make_blob(vid, 1))[0], 201)
+        t0 = datetime(2026, 11, 3, 12, 0, 0, tzinfo=timezone.utc)
+        with mock.patch.object(admin, "_utcnow", return_value=t0):
+            self.assertEqual(self.admin_run(admin.cmd_delete_vault, argparse.Namespace(vault_id=vid, yes=True))[0], 0)
+        name = "%s-20261103T120000Z" % vid
+        tdir = C.trash_dir(self.cfg)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(admin.purge_trash(self.cfg, now=t0 + timedelta(days=29)), [])
+            self.assertEqual(admin.purge_trash(self.cfg, now=t0 + timedelta(days=31), dry_run=True), [name])
+            self.assertTrue(os.path.isdir(os.path.join(tdir, name)))
+            out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertIn(name, admin.purge_trash(self.cfg, now=t0 + timedelta(days=31)))
+        self.assertIn("purge " + os.path.join(tdir, name), out.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(tdir, name)))
+        self.assertNotEqual(self.admin_run(admin.cmd_undelete_vault, argparse.Namespace(vault_id=vid, entry=None))[0], 0)
 
 
 if __name__ == "__main__":

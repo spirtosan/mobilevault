@@ -1,5 +1,5 @@
 [Unit]
-Description=Mobile Vault backup retention (prune old revisions)
+Description=Mobile Vault backup retention (prune old revisions, purge 30-day-old trash)
 
 [Service]
 Type=oneshot
@@ -8,6 +8,8 @@ Group=mvault
 Environment=PYTHONPATH=/opt/mvault
 Environment=MVAULT_CONFIG=/etc/mvault/config.json
 ExecStart=/usr/bin/python3 -m mvault.admin retention
+# Task 11: the trash is root-only, so the purge step runs with full privileges ("+").
+ExecStart=+/usr/bin/python3 -m mvault.admin purge-trash
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

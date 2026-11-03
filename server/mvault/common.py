@@ -281,6 +281,13 @@ def list_vaults(cfg):
     return out
 
 
+def trash_dir(cfg):
+    """Root-only trash for deleted vaults (`mvault-admin delete-vault`). Default: next to the data
+    directory (`<data_dir>/../trash`), outside the service user's writable tree, same disk (so the
+    move is an atomic rename)."""
+    return cfg.get("trash_dir") or os.path.join(os.path.dirname(os.path.normpath(cfg["data_dir"])), "trash")
+
+
 def read_revision(cfg, vault_id, rev):
     p = os.path.join(cfg["data_dir"], vault_id, rev_filename(rev))
     with open(p, "rb") as f:
