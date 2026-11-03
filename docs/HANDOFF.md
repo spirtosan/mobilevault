@@ -27,6 +27,11 @@ The main goal is **maximum protection against losing passwords**: strong offline
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
 
+### How we test
+- **Debug app only** (`com.spirtosan.mobilevault.debug`) with test data; never the release app (see the rule at the top).
+- **Server tests clean up after themselves (Task 11):** the smoke test is run with `--cleanup ssh:<ADMIN_USER>@<SERVER_HOST>` (`python server/tools/mvault_smoke.py <URL> <CODE> --cleanup ssh:…`); at the end it runs `mvault-admin delete-vault --yes <test vault>` and `mvault-admin revoke <device>`. Every debug pairing test (debug app paired as `xiaomi-debug-N` etc.) ends the same way on the server: `mvault-admin delete-vault --yes <vault it uploaded>` (check with `mvault-admin stats`: only vaults whose devices are all debug/test names) and `mvault-admin revoke <device>`. Deleted vaults stay in the root-only trash for 30 days (`mvault-admin trash`).
+- Server unit tests run on the server in a `mktemp -d` dir as `nobody` (see Lessons learned).
+
 ## 4. Key decisions (details in DECISIONS.md)
 - Kotlin + Jetpack Compose, minSdk 28, app ID `com.spirtosan.mobilevault`, GPL-3.0.
 - Vault format **PVAULT2**: random DEK (rotated on recovery-key changes and on request when changing the password, Task 08); slots = password (Argon2id, calibrated per phone, 64 MiB/t3/p4 on the Xiaomi, NFC-normalised) + **optional** recovery key (160-bit, 36 chars Crockford Base32 + checksum, HKDF; owner's choice 2026-11-02); header = GCM AAD; optional plaintext hint; `rev` counter; entry UUIDs + tombstones. Reads desktop **PVAULT1** for import.

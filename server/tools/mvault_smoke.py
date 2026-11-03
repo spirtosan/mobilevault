@@ -4,13 +4,15 @@ PVAULT2 file, lists vaults and revisions, downloads, checks that overwrite is re
 
 Usage (on any machine with python3 + openssl):
   1. on the server:  sudo mvault-admin pair smoketest      → note the code
-  2. python3 mvault_smoke.py https://vault.<DOMAIN>/api/v1 <CODE>
-  3. on the server:  sudo mvault-admin revoke smoketest
-     and remove the printed test vault directory as root.
+  2. python3 mvault_smoke.py https://vault.<DOMAIN>/api/v1 <CODE> [--cleanup ssh:<ADMIN_USER>@<SERVER_HOST> | --cleanup local]
+With --cleanup the test removes what it made (Task 11): `mvault-admin delete-vault --yes <test vault>`
+(into the 30-day trash) and `mvault-admin revoke <device>`, over SSH or locally (when run on the server
+as root). Without it, do both by hand afterwards (the commands are printed).
 """
 import hashlib
 import json
 import os
+import shlex
 import ssl
 import struct
 import subprocess
@@ -21,8 +23,33 @@ import uuid
 from http.client import HTTPSConnection
 
 
+def cleanup(target, vid, device):
+    """Move the test vault to the trash and revoke the test device (needs root on the server)."""
+    good = True
+    for c in (["mvault-admin", "delete-vault", "--yes", vid], ["mvault-admin", "revoke", device]):
+        if target == "local":
+            r = subprocess.run(c, capture_output=True, text=True)
+        else:
+            r = subprocess.run(["ssh", "-o", "BatchMode=yes", target, shlex.join(c)], capture_output=True, text=True)
+        good &= r.returncode == 0
+        print(("PASS " if r.returncode == 0 else "FAIL ") + "cleanup: " + " ".join(c[1:]))
+        if r.returncode:
+            print(r.stdout + r.stderr)
+    return good
+
+
 def main():
-    base, code = sys.argv[1].rstrip("/"), sys.argv[2].replace("-", "").upper()
+    args = sys.argv[1:]
+    target = None
+    if "--cleanup" in args:
+        i = args.index("--cleanup")
+        target = args[i + 1] if i + 1 < len(args) else ""
+        del args[i:i + 2]
+        if target != "local":
+            if not target.startswith("ssh:"):
+                sys.exit("--cleanup local | ssh:<user>@<host>")
+            target = target[4:]
+    base, code = args[0].rstrip("/"), args[1].replace("-", "").upper()
     u = urllib.parse.urlsplit(base)
     work = tempfile.mkdtemp(prefix="mvault-smoke-")
     key, crt = os.path.join(work, "k.pem"), os.path.join(work, "c.pem")
@@ -88,7 +115,11 @@ def main():
     check("download matches", (st, data == blob), (200, True))
     check("wrong token refused", call("GET", f"/vaults/{vid}/revs", None,
                                       {"Authorization": "Bearer nope"})[0], 401)
-    print("\nTest vault id (delete its directory on the server as root):", vid)
+    if target:
+        ok &= cleanup(target, vid, j["device"])
+    else:
+        print("\nClean up on the server as root:  mvault-admin delete-vault --yes %s && mvault-admin revoke %s"
+              % (vid, j["device"]))
     print("ALL PASSED" if ok else "SOME CHECKS FAILED")
     sys.exit(0 if ok else 1)
 
