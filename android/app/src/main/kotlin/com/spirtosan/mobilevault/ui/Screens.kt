@@ -477,17 +477,18 @@ internal fun NewRecoveryKeyDialog(vm: AppViewModel, adding: Boolean = false, onD
 @Composable
 private fun RemoveRecoveryKeyDialogs(vm: AppViewModel, onDone: () -> Unit) {
     var pw by remember { mutableStateOf("") }
-    var verified by remember { mutableStateOf(false) }
-    if (!verified) ConfirmDialog(
+    // the checked password is kept for step 2: it re-wraps the new vault key
+    var checked by remember { mutableStateOf<String?>(null) }
+    val ok = checked
+    if (ok == null) ConfirmDialog(
         "Remove recovery key", "Enter your master password to continue.",
         confirm = "Continue", confirmTag = "removePwOk", confirmEnabled = pw.isNotEmpty() && !vm.busy,
-        // the typed password stays until step 2: it re-wraps the new vault key
-        onConfirm = { vm.checkPasswordForRemoval(pw.toCharArray(), onWrong = { pw = "" }) { verified = true } }, onDismiss = onDone,
+        onConfirm = { val typed = pw; pw = ""; vm.checkPasswordForRemoval(typed.toCharArray()) { checked = typed } }, onDismiss = onDone,
     ) { PasswordField(pw, { pw = it }, "Master password", tag = "removePw") }
     else ConfirmDialog(
         "Remove the recovery key?", KeyChanges.REMOVE_CONFIRM,
         confirm = "Remove", confirmColor = Palette.red, confirmTag = "removeConfirm",
-        onConfirm = { val p = pw.toCharArray(); pw = ""; onDone(); vm.removeRecoveryKey(p) }, onDismiss = { pw = ""; onDone() },
+        onConfirm = { checked = null; onDone(); vm.removeRecoveryKey(ok.toCharArray()) }, onDismiss = { checked = null; onDone() },
     )
 }
 

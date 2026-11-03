@@ -414,10 +414,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Step 1 of "Remove recovery key": check the master password, then [onOk] shows the confirm dialog. */
-    fun checkPasswordForRemoval(password: CharArray, onWrong: () -> Unit = {}, onOk: () -> Unit) = work {
+    fun checkPasswordForRemoval(password: CharArray, onOk: () -> Unit) = work {
         try {
             val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
-            if (ok) onOk() else { onWrong(); fail("Master password is wrong") }
+            if (ok) onOk() else fail("Master password is wrong")
         } finally { password.wipe() }
     }
 
