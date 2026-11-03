@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.spirtosan.mobilevault.security.BiometricPolicy
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -40,6 +41,11 @@ class AppSettings(private val context: Context) {
         val kitPending = booleanPreferencesKey("kit_pending")
         val wifiOnly = booleanPreferencesKey("backup_wifi_only")
         val testRestoreDismissed = longPreferencesKey("test_restore_dismissed_at")
+        val bioDays = intPreferencesKey("bio_max_days")
+        val pwTypedAt = longPreferencesKey("password_typed_at")
+        val pwTypedBoot = intPreferencesKey("password_typed_boot")
+        val bioFailures = intPreferencesKey("bio_failures")
+        val bioInvalidated = booleanPreferencesKey("bio_invalidated")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -93,4 +99,28 @@ class AppSettings(private val context: Context) {
     val testRestoreDismissedAt: Flow<Long> = context.store.data.map { it[K.testRestoreDismissed] ?: 0L }
 
     suspend fun setTestRestoreDismissed(ms: Long) { context.store.edit { it[K.testRestoreDismissed] = ms } }
+
+    // ── fingerprint unlock (BiometricPolicy) ─────────────────────────────────────
+    suspend fun biometricState(enabled: Boolean): BiometricPolicy.State = context.store.data.first().let {
+        BiometricPolicy.State(
+            enabled = enabled, invalidated = it[K.bioInvalidated] ?: false,
+            lastPasswordAt = it[K.pwTypedAt] ?: 0L, bootCountAtPassword = it[K.pwTypedBoot] ?: -1,
+            failures = it[K.bioFailures] ?: 0, maxDays = it[K.bioDays] ?: BiometricPolicy.DEFAULT_DAYS,
+        )
+    }
+
+    val biometricDays: Flow<Int> = context.store.data.map { it[K.bioDays] ?: BiometricPolicy.DEFAULT_DAYS }
+
+    suspend fun setBiometricDays(days: Int) { context.store.edit { it[K.bioDays] = days } }
+
+    /** The master password was typed correctly (unlock, change, practice, turning on fingerprint unlock). */
+    suspend fun recordPasswordTyped(nowMs: Long, bootCount: Int) {
+        context.store.edit { it[K.pwTypedAt] = nowMs; it[K.pwTypedBoot] = bootCount; it.remove(K.bioFailures) }
+    }
+
+    suspend fun setBiometricFailures(n: Int) { context.store.edit { if (n == 0) it.remove(K.bioFailures) else it[K.bioFailures] = n } }
+
+    suspend fun addBiometricFailure() { context.store.edit { it[K.bioFailures] = (it[K.bioFailures] ?: 0) + 1 } }
+
+    suspend fun setBiometricInvalidated(v: Boolean) { context.store.edit { if (v) it[K.bioInvalidated] = true else it.remove(K.bioInvalidated) } }
 }

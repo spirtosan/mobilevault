@@ -17,6 +17,7 @@ import com.spirtosan.mobilevault.backup.DeviceKeys
 import com.spirtosan.mobilevault.data.AppSettings
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultRepository
+import com.spirtosan.mobilevault.security.BiometricVault
 import com.spirtosan.mobilevault.security.Clipboard
 import com.spirtosan.mobilevault.security.Session
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,7 @@ class MobileVaultApp : Application() {
     lateinit var session: Session private set
     lateinit var settings: StateFlow<Settings> private set
     lateinit var backup: BackupManager private set
+    lateinit var biometric: BiometricVault private set
 
     private var backgroundLock: Job? = null
 
@@ -58,6 +60,7 @@ class MobileVaultApp : Application() {
         settings = appSettings.settings.stateIn(scope, SharingStarted.Eagerly, Settings())
         backup = BackupManager(filesDir, DeviceKeys(this))
         repo.onSaved = { queueBackup() }
+        biometric = BiometricVault(filesDir)
 
         ContextCompat.registerReceiver(this, object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) = session.lock()

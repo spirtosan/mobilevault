@@ -3,6 +3,8 @@ package com.spirtosan.mobilevault.ui
 import android.app.Application
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.Settings.Global
+import javax.crypto.Cipher
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +30,8 @@ import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.wipe
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
+import com.spirtosan.mobilevault.security.BiometricPolicy
+import com.spirtosan.mobilevault.security.BiometricVault
 import com.spirtosan.mobilevault.security.KdfCalibration
 import com.spirtosan.mobilevault.security.PasswordGenerator
 import com.spirtosan.mobilevault.security.UnlockThrottle
@@ -127,12 +131,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         app.assets.open("eff_short_wordlist_1.txt").bufferedReader().readLines().filter { it.isNotBlank() }
     }
 
-    init {
-        screen = if (session.isUnlocked) Screen.VaultList else if (repo.exists()) Screen.Unlock else Screen.Onboarding
-        viewModelScope.launch { session.lockEvents.collect { onLocked(it) } }
-        if (screen == Screen.Unlock) prepareUnlock()
-    }
-
     // ── navigation ────────────────────────────────────────────────────────────
     fun go(s: Screen) { backStack.addLast(screen); screen = s; onEnter(s) }
 
@@ -205,6 +203,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Save before the key is shown: the user may save or print the Emergency Kit and then get
         // locked out of this screen (screen off, leaving the app). The key must still open the vault.
         withContext(Dispatchers.IO) { repo.save(created.bytes) }
+        disableBiometric(quiet = true)                // a new vault has a new DEK
         prefs.setKitPending(created.recoveryKey != null)
         session.open(created.vault)
         hasRecoveryKey = created.recoveryKey != null
@@ -258,7 +257,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         hint = header?.hint
         vaultId = header?.vaultId
         hasRecoveryKey = header?.hasRecoveryKey ?: false
+        bioAutoOffered = false
         viewModelScope.launch {
+            refreshBiometric()
             val (n, _) = prefs.failures()
             showHintButton = n > 0 && hint != null
             startWaitCountdown()
@@ -288,6 +289,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val v = withContext(Dispatchers.Default) { Pvault2.unlockWithPassword(repo.read(), password) }
                 prefs.clearFailures()
+                passwordTyped()
                 openAndShowList(v)
             } catch (e: WrongKeyException) {
                 prefs.recordFailure(System.currentTimeMillis())
@@ -332,6 +334,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun afterUnlock() {
         a.queueBackup()
         a.scope.launch { runCatching { a.resolveNewRevision() } }
+        viewModelScope.launch { refreshBiometric() }
     }
 
     // ── password & recovery key changes ───────────────────────────────────────
@@ -348,6 +351,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.Default) {
                 session.withVault(save = true) { it.changePassword(newPassword, hint.ifBlank { null }, kdf) }
             }
+            passwordTyped()
             replace(Screen.VaultList)
             message = "Master password changed"
         } finally { current?.wipe(); newPassword.wipe() }
@@ -578,6 +582,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 lastError = null, stopped = false, needsNewRev = false)
         }
         withContext(Dispatchers.IO) { repo.save(raw) }
+        disableBiometric(quiet = true)                // restored vault: another DEK than any old blob
         prefs.clearFailures()
         prefs.setKitPending(false)
         restoreRaw = null; restoreHeader = null; remoteRevs = emptyList()
@@ -657,6 +662,96 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissTestRestoreReminder() = viewModelScope.launch { prefs.setTestRestoreDismissed(System.currentTimeMillis()) }
 
+    // ── fingerprint unlock ────────────────────────────────────────────────────
+    private val bio = a.biometric
+    /** Fingerprint unlock is set up for this vault (Settings switch). */
+    var biometricEnabled by mutableStateOf(false); private set
+    /** The unlock screen may offer the fingerprint now (BiometricPolicy says NONE). */
+    var biometricAllowed by mutableStateOf(false); private set
+    /** Why the master password is required instead (reboot, N days, failures, new fingerprint). */
+    var biometricReason by mutableStateOf<String?>(null); private set
+    /** The prompt opens by itself once per visit of the unlock screen. */
+    var bioAutoOffered = false
+
+    private fun bootCount() = Global.getInt(getApplication<Application>().contentResolver, Global.BOOT_COUNT, 0)
+
+    private fun bioMatchesVault() = bio.isEnabled() && bio.vaultId() != null && bio.vaultId() == localVaultId()
+
+    suspend fun refreshBiometric() {
+        biometricEnabled = bioMatchesVault()
+        val st = prefs.biometricState(biometricEnabled)
+        val need = BiometricPolicy.check(st, bootCount(), reminderNow())
+        biometricAllowed = need == BiometricPolicy.Need.NONE
+        biometricReason = BiometricPolicy.reason(need, st.maxDays)
+    }
+
+    /** The master password was typed correctly: restart the N-day clock, note the boot, reset fingerprint failures. */
+    private suspend fun passwordTyped() {
+        prefs.recordPasswordTyped(reminderNow(), bootCount())
+        if (prefs.biometricState(false).invalidated) {
+            prefs.setBiometricInvalidated(false)
+            message = "Fingerprints changed on this phone. Turn on fingerprint unlock again in Settings → Security."
+        }
+        refreshBiometric()
+    }
+
+    /** Cipher for the unlock prompt, or null (then the password is needed) if the key was invalidated. */
+    fun biometricUnlockCipher(): Cipher? = try { bio.decryptCipher() } catch (e: BiometricVault.Invalidated) {
+        bio.disable()
+        viewModelScope.launch { prefs.setBiometricInvalidated(true); refreshBiometric() }
+        null
+    }
+
+    fun onBiometricFailed() = viewModelScope.launch { prefs.addBiometricFailure(); refreshBiometric() }
+
+    /** The system locked the sensor (too many attempts): the master password is required. */
+    fun onBiometricLockout() = viewModelScope.launch { prefs.setBiometricFailures(BiometricPolicy.MAX_FAILURES); refreshBiometric() }
+
+    fun unlockWithBiometric(cipher: Cipher) = work {
+        val raw = withContext(Dispatchers.IO) { repo.read() }
+        val dek = try { bio.unwrap(cipher) } catch (e: Exception) { fail("Fingerprint unlock failed. Enter your master password."); return@work }
+        try {
+            val v = withContext(Dispatchers.Default) { Pvault2.unlockWithDek(raw, dek) }
+            prefs.setBiometricFailures(0)
+            prefs.clearFailures()
+            openAndShowList(v)
+        } catch (e: WrongKeyException) {
+            bio.disable()
+            refreshBiometric()
+            unlockError = "Fingerprint unlock doesn't match this vault any more. Enter your master password."
+        }
+    }
+
+    /** Settings: step 1 of turning on, check the master password; [onOk] then shows the fingerprint prompt. */
+    fun checkPasswordForBiometric(password: CharArray, onOk: (Cipher) -> Unit) = work {
+        try {
+            val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
+            if (!ok) { fail("Master password is wrong"); return@work }
+            passwordTyped()
+            onOk(bio.encryptCipher())
+        } finally { password.wipe() }
+    }
+
+    /** Step 2: the fingerprint was accepted, wrap the DEK with the authenticated cipher. */
+    fun finishEnableBiometric(cipher: Cipher) = work {
+        val (dek, id) = session.read { it.exportDekForBiometric() to it.vaultId } ?: return@work
+        bio.store(cipher, dek, id)
+        prefs.setBiometricInvalidated(false)
+        prefs.setBiometricFailures(0)
+        refreshBiometric()
+        message = "Fingerprint unlock is on"
+    }
+
+    fun disableBiometric(quiet: Boolean = false) {
+        bio.disable()
+        biometricEnabled = false
+        biometricAllowed = false
+        if (!quiet) message = "Fingerprint unlock is off"
+    }
+
+    val biometricDays get() = prefs.biometricDays
+    fun setBiometricDays(days: Int) = viewModelScope.launch { prefs.setBiometricDays(days) }
+
     // ── helpers ───────────────────────────────────────────────────────────────
     private fun work(block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -665,5 +760,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 fail("Error: ${e.message ?: e.javaClass.simpleName}")
             } finally { busy = false }
         }
+    }
+
+    // Last in the class: init runs in declaration order and the coroutines below start immediately
+    // (Main.immediate), so every property above must already be initialised.
+    init {
+        screen = if (session.isUnlocked) Screen.VaultList else if (repo.exists()) Screen.Unlock else Screen.Onboarding
+        viewModelScope.launch { session.lockEvents.collect { onLocked(it) } }
+        if (screen == Screen.Unlock) prepareUnlock()
     }
 }

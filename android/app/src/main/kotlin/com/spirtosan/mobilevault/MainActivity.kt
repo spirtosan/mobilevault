@@ -2,7 +2,7 @@ package com.spirtosan.mobilevault
 
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -16,7 +16,8 @@ import com.spirtosan.mobilevault.ui.AppViewModel
 import com.spirtosan.mobilevault.ui.MobileVaultTheme
 
 @OptIn(ExperimentalComposeUiApi::class)
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity because BiometricPrompt needs one. */
+class MainActivity : FragmentActivity() {
     private val vm: AppViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {

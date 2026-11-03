@@ -77,6 +77,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")   // 5.x needs compileSdk 37 + a newer AGP
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")   // BiometricPrompt needs a FragmentActivity; biometric pulls an old one
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")   // QR scanner: ZXing core, own camera code
 
     // Benchmark screen only: compares against the old BouncyCastle Argon2.

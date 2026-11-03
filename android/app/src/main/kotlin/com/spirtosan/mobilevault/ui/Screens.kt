@@ -88,6 +88,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.fragment.app.FragmentActivity
 import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.data.Settings
@@ -305,15 +306,22 @@ private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var pw by remember { mutableStateOf("") }
     var hintShown by remember { mutableStateOf(false) }
     val submit = { if (pw.isNotEmpty()) { vm.unlock(pw.toCharArray()); pw = "" } }
+    val activity = LocalContext.current as FragmentActivity
+    // The fingerprint prompt opens by itself once when the policy allows it; the password field is always there.
+    LaunchedEffect(vm.biometricAllowed) {
+        if (vm.biometricAllowed && !vm.bioAutoOffered) { vm.bioAutoOffered = true; offerBiometricUnlock(vm, activity) }
+    }
     Page("", snackbar, busy = vm.busy) {
         BrandHeader("Vault locked")
         PanelCard {
+            vm.biometricReason?.let { WarnText(it, "bioReason") }
             PasswordField(pw, { pw = it }, "Master password", tag = "unlockPw", imeAction = ImeAction.Go, onDone = submit,
                 isError = vm.unlockError != null)
             vm.unlockError?.let { ErrorText(it) }
             if (vm.waitSeconds > 0) WarnText("Too many attempts. Try again in ${vm.waitSeconds} s.")
             MainButton("Unlock", submit, Modifier.fillMaxWidth().testTag("unlock"), Icons.Filled.LockOpen,
                 enabled = !vm.busy && vm.waitSeconds == 0 && pw.isNotEmpty())
+            if (vm.biometricAllowed) BiometricUnlockButton(vm)
             if (vm.showHintButton && vm.hint != null) {
                 if (hintShown) WarnText("Hint: ${vm.hint}")
                 else TextButton(onClick = { hintShown = true }) { Text("Show hint", color = Palette.navFg) }
@@ -617,6 +625,7 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             }
             ChoiceRow("Clear copied passwords after", Settings.CLIPBOARD_CHOICES, s.clipboardClearSeconds,
                 { if (it == 0) "Never" else "$it s" }) { vm.updateSettings(s.copy(clipboardClearSeconds = it)) }
+            BiometricSettings(vm)
             ColorButton("Change master password", { vm.go(Screen.NewPassword(forced = false)) }, Palette.blue,
                 Modifier.fillMaxWidth(), Icons.Filled.Password)
         }
