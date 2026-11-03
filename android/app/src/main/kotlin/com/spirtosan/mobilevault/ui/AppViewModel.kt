@@ -542,6 +542,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The decrypted source has its own sections ("Keep its sections"). */
     var importSourceSections by mutableStateOf(0); private set
     private var importFromServer = false
+    /** Shown on the import screens themselves (Task 11: no silent failures; a snackbar alone is easy to miss). */
+    var importError by mutableStateOf<String?>(null)
+    /** +1 per started import: the password screen is keyed on it, so every import starts with empty fields. */
+    var importSeq by mutableStateOf(0); private set
+
+    private fun importFail(text: String) { importError = text; fail(text) }
+
+    /** [work] for the import flow: every failure, even an unexpected one, is shown on the screen. */
+    private fun importWork(block: suspend () -> Unit) = work {
+        try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
+            importFail("Import failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+    }
 
     private fun displayName(uri: Uri): String? = runCatching {
         getApplication<Application>().contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -549,15 +562,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }.getOrNull()
 
     /** A file was picked: desktop vault (PVAULT1) or Mobile Vault file (PVAULT2), told apart by its magic bytes. */
-    fun importPicked(uri: Uri) = work {
+    fun importPicked(uri: Uri) = importWork {
         val raw = withContext(Dispatchers.IO) {
-            getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-        }
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } ?: run { importFail("Can't read that file."); return@importWork }
         if (!startImport(raw, ImportInto.nameFromFile(displayName(uri)), fromServer = false)) raw.wipe()
     }
 
     private fun startImport(raw: ByteArray, name: String, fromServer: Boolean): Boolean {
         importHeader = null
+        importError = null
         if (Pvault2.isPvault2(raw)) {
             if (!session.isUnlocked) {
                 fail("A Mobile Vault file is imported into an open vault (Settings → Import). On a new phone, use Restore from backup.")
@@ -572,13 +586,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         importBytes = raw
         importName = name
         importFromServer = fromServer
+        importSeq++
         go(Screen.ImportPassword)
         return true
     }
 
     /** Open the source in memory: desktop password, or the PVAULT2 vault's own master password or recovery key. */
-    fun importDecrypt(password: CharArray?, recoveryKeyText: String? = null) = work {
-        val raw = importBytes ?: return@work
+    fun importDecrypt(password: CharArray?, recoveryKeyText: String? = null) = importWork {
+        importError = null
+        val raw = importBytes ?: run { password?.wipe(); importFail("The import was cancelled. Pick the file again."); return@importWork }
         try {
             val p = withContext(Dispatchers.Default) {
                 when {
@@ -591,11 +607,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             importSourceSections = VaultEdits.sections(p).size
             screen = Screen.ImportPreview(p.activeEntries.size)
         } catch (e: WrongKeyException) {
-            fail(if (password != null) "Wrong password for this vault" else "This recovery key does not open this vault")
+            importFail(if (password != null) "Wrong password for this vault" else "This recovery key does not open this vault")
         } catch (e: IllegalArgumentException) {
-            fail(e.message ?: "That is not a valid recovery key")
+            importFail(e.message ?: "That is not a valid recovery key")
         } catch (e: VaultFormatException) {
-            fail((if (importIsMobile) "Can't open this Mobile Vault file: " else "Not a desktop vault file: ") + e.message)
+            importFail((if (importIsMobile) "Can't open this Mobile Vault file: " else "Not a desktop vault file: ") + e.message)
         } finally { password?.wipe() }
     }
 
@@ -621,12 +637,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: BackupException) { fail(e.text) }
     }
 
-    fun pickImportRevision(rev: Long) = work {
-        val id = importVaultId ?: return@work
+    fun pickImportRevision(rev: Long) = importWork {
+        val id = importVaultId ?: run { importFail("Pick the vault again."); return@importWork }
         try {
             val raw = Restore.fetch(target(), id, rev)
-            startImport(raw, "Imported", fromServer = true)
-        } catch (e: BackupException) { fail(e.text) }
+            if (!startImport(raw, "Imported", fromServer = true)) raw.wipe()
+        } catch (e: BackupException) { importFail(e.text) }
     }
 
     fun importAsNewVault() {
@@ -636,12 +652,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Merge the decrypted source into the open vault; saved and backed up like any change. The source is not touched. */
-    fun importMerge(target: ImportInto.Target = ImportInto.Target.NoSection, keepSections: Boolean = false) = work {
-        val p = imported ?: return@work
+    fun importMerge(target: ImportInto.Target = ImportInto.Target.NoSection, keepSections: Boolean = false) = importWork {
+        importError = null
+        val p = imported ?: run { importFail("The import was cancelled. Start it again from Settings → Import."); return@importWork }
         var text = ""
         try {
             session.update { cur -> ImportInto.apply(cur, p, target, keepSections).also { text = it.text }.payload }
-        } catch (e: IllegalArgumentException) { fail(e.message ?: "Not possible"); return@work }
+        } catch (e: IllegalArgumentException) { importFail(e.message ?: "Not possible"); return@importWork }
         val note = when {
             importFromServer -> " The vault on the server was not changed; delete it yourself or leave it."
             importIsMobile -> " The original file was not changed; keep or delete it yourself."

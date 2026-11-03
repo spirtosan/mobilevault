@@ -64,8 +64,11 @@ One vault with optional sections (`sec` + `settings.sections`, PVAULT2 v2 unchan
 ### Done with the owner (2026-11-03): release app switched to the real vault
 The release app now holds the owner's real vault (sections Personal / Work, new master password, rotated key, new Emergency Kit). **It is off-limits from now on** (permanent rule at the top): only install newer release builds over it. Details and a found import-preview bug: STATUS.md.
 
+### Done: Task 11 (2026-11-03): vault trash, release app handover, import fixes
+`mvault-admin delete-vault` / `undelete-vault` / `trash` (root-only 30-day trash, purged by the retention service); debug test vaults moved to the trash; the permanent release-app rule above; import preview preselects the existing section, clear errors on the import screens, every secret field empty on open and cleared on close, autofill off. Release 0.3.0 installed over the real-vault app.
+
 ### Next
-Task 11 (not started). Owner check: HyperOS battery settings.
+Owner: open the release app and check that it unlocks with Personal 35 / Work 6. Owner check: HyperOS battery settings.
 
 ### Later
 Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
@@ -94,4 +97,6 @@ Server (future task): stale TURN `external-ip`; restic + off-site backup of the 
 - adb UI checks: debug builds expose test tags as resource ids (`uiautomator dump`); dialogs don't, so find them by text. Type into fields with a URI keyboard (`input text`), otherwise HyperOS's keyboard auto-capitalises and adds spaces.
 - Never commit screenshots of the Backup screen: they show the real server name.
 - Git Bash rewrites `/sdcard/...` in adb arguments into Windows paths: set `MSYS_NO_PATHCONV=1` for adb shell commands. The server's Python tests can't run on Windows (`os.link`, directory fsync): run them on the server in a `mktemp -d` dir as `nobody`.
+- Before UI tests, check the phone isn't in landscape (auto-rotate on, phone lying sideways): buttons below the fold get no tap and almost every test fails. Turn auto-rotate off for the run (`settings put system accelerometer_rotation 0`), then on again.
+- Password, recovery-key and pairing fields: use `rememberSecret()` (Components.kt), never `rememberSaveable` (that puts the secret into the saved-instance state and can bring it back later). Autofill is off for the whole window (MainActivity).
 - Compose dialogs: don't clear a field from an async "wrong password" callback; the user may already be typing again. Clear it on click instead.

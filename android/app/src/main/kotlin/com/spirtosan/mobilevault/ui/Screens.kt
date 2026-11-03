@@ -75,6 +75,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -145,7 +146,8 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         is Screen.Edit -> EditScreen(vm, snackbar, s.id)
         Screen.Settings -> SettingsScreen(vm, snackbar)
         Screen.Sections -> SectionsScreen(vm, snackbar)
-        Screen.ImportPassword -> ImportPasswordScreen(vm, snackbar)
+        // keyed per import: a new file always gets a fresh, empty password field (Task 11)
+        Screen.ImportPassword -> key(vm.importSeq) { ImportPasswordScreen(vm, snackbar) }
         Screen.ImportServer -> ImportServerScreen(vm, snackbar)
         Screen.ImportServerRevs -> ImportServerRevsScreen(vm, snackbar)
         is Screen.ImportPreview -> ImportPreviewScreen(vm, snackbar, s.count)
@@ -238,10 +240,10 @@ private fun newPasswordFields(
 
 @Composable
 private fun CreateScreen(vm: AppViewModel, snackbar: SnackbarHostState, s: Screen.Create) {
-    var pw by rememberSaveable { mutableStateOf("") }
-    var confirm by rememberSaveable { mutableStateOf("") }
+    var pw by rememberSecret()
+    var confirm by rememberSecret()
     var hint by rememberSaveable { mutableStateOf("") }
-    var keyStep by rememberSaveable { mutableStateOf(false) }      // step 2: recovery key or skip
+    var keyStep by remember { mutableStateOf(false) }      // step 2: recovery key or skip (not saveable: the password isn't)
     if (keyStep) {
         BackHandler { keyStep = false }
         RecoveryKeyStep(vm, snackbar, onBack = { keyStep = false }) { withKey ->
@@ -316,7 +318,7 @@ private fun KitScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 // ── unlock & recovery ────────────────────────────────────────────────────────
 @Composable
 private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     var hintShown by remember { mutableStateOf(false) }
     val submit = { if (pw.isNotEmpty()) { vm.unlock(pw.toCharArray()); pw = "" } }
     val activity = LocalContext.current as FragmentActivity
@@ -351,7 +353,7 @@ private fun UnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 @Composable
 private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     // Kept while the app is locked in the background: nothing is open on this screen (see AppViewModel.onLocked).
-    var key by remember { mutableStateOf("") }
+    var key by rememberSecret()
     val submit = { if (key.isNotBlank() && !vm.busy) vm.unlockWithRecoveryKey(key) }
     Page("Recovery key", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
@@ -371,7 +373,7 @@ private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 /** Settings → Security → "Check my recovery key": only checks, changes nothing, no master password needed. */
 @Composable
 private fun CheckRecoveryKeyScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
-    var key by remember { mutableStateOf("") }
+    var key by rememberSecret()
     val submit = { if (key.isNotBlank() && !vm.busy) vm.checkRecoveryKey(key) }
     Page("Check my recovery key", snackbar, onBack = { key = ""; vm.resetKeyCheck(); vm.back() }, busy = vm.busy) {
         PanelCard {
@@ -391,9 +393,9 @@ private fun CheckRecoveryKeyScreen(vm: AppViewModel, snackbar: SnackbarHostState
 
 @Composable
 private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, forced: Boolean, withoutCurrent: Boolean = false) {
-    var current by remember { mutableStateOf("") }
-    var pw by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
+    var current by rememberSecret()
+    var pw by rememberSecret()
+    var confirm by rememberSecret()
     var hint by remember { mutableStateOf("") }
     var rotate by remember { mutableStateOf(false) }
     Page(if (forced) "Set a new master password" else "Change master password", snackbar, onBack = { vm.back() }, busy = vm.busy) {
@@ -518,7 +520,7 @@ private fun KitPendingCard(vm: AppViewModel) {
 /** "New recovery key" / "Create recovery key": the master password is needed to re-wrap the new vault key (DEK rotation). */
 @Composable
 internal fun NewRecoveryKeyDialog(vm: AppViewModel, adding: Boolean = false, onDone: () -> Unit) {
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     ConfirmDialog(
         if (adding) "Create recovery key" else "New recovery key?", KeyChanges.NEW_KEY_CONFIRM,
         confirm = "Continue", confirmTag = "newKeyOk", confirmEnabled = pw.isNotEmpty() && !vm.busy,
@@ -529,7 +531,7 @@ internal fun NewRecoveryKeyDialog(vm: AppViewModel, adding: Boolean = false, onD
 /** "Remove recovery key": master password first, then a confirmation, then the slot is dropped and saved. */
 @Composable
 private fun RemoveRecoveryKeyDialogs(vm: AppViewModel, onDone: () -> Unit) {
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     // the checked password is kept for step 2: it re-wraps the new vault key
     var checked by remember { mutableStateOf<String?>(null) }
     val ok = checked
@@ -755,8 +757,8 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 
 @Composable
 private fun ImportPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
-    var pw by remember { mutableStateOf("") }
-    var key by remember { mutableStateOf("") }
+    var pw by rememberSecret()
+    var key by rememberSecret()
     var useKey by remember { mutableStateOf(false) }
     val h = vm.importHeader
     val submit = {
@@ -766,18 +768,21 @@ private fun ImportPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
         PanelCard {
             if (!vm.importIsMobile) {
                 Muted("Enter the password of the desktop vault file.")
-                PasswordField(pw, { pw = it }, "Desktop vault password", tag = "importPw", imeAction = ImeAction.Go, onDone = submit)
+                PasswordField(pw, { pw = it; vm.importError = null }, "Desktop vault password", tag = "importPw", imeAction = ImeAction.Go,
+                    onDone = submit, isError = vm.importError != null)
             } else {
                 Muted("This is another Mobile Vault (saved ${h?.updated?.let { localTime(it) } ?: "?"}). It is opened in memory only, " +
                     "with ITS master password or recovery key, and is not changed.")
                 if (!useKey) {
-                    PasswordField(pw, { pw = it }, "Master password of that vault", tag = "importPw", imeAction = ImeAction.Go, onDone = submit)
+                    PasswordField(pw, { pw = it; vm.importError = null }, "Master password of that vault", tag = "importPw",
+                        imeAction = ImeAction.Go, onDone = submit, isError = vm.importError != null)
                     h?.hint?.let { Muted("Hint: $it") }
-                } else KeyField(key, { key = it }, "Recovery key of that vault", tag = "importKey")
+                } else KeyField(key, { key = it; vm.importError = null }, "Recovery key of that vault", tag = "importKey")
                 if (h?.hasRecoveryKey == true) TextButton(onClick = { useKey = !useKey }) {
                     Text(if (useKey) "Use its master password instead" else "Use its recovery key instead", color = Palette.navFg)
                 }
             }
+            vm.importError?.let { ErrorText(it, "importError") }
             MainButton("Open", submit, Modifier.fillMaxWidth().testTag("importOpen"), Icons.Filled.FolderOpen,
                 enabled = (if (useKey) key.isNotBlank() else pw.isNotEmpty()) && !vm.busy)
         }
@@ -808,8 +813,9 @@ private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, c
     val payload by vm.payload.collectAsState()
     val unlocked = payload != null
     val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
-    // default target: a new section named after the file ("Work"), unless the vault doesn't use sections and the source has none
-    var target by remember { mutableStateOf(if (sections.isEmpty() && vm.importSourceSections == 0) "" else NEW_SECTION) }
+    // default target (Task 11): the existing section named like the file ("Personal") if there is one; else a new section
+    // with that name; "No section" when neither vault uses sections
+    var target by remember { mutableStateOf(ImportInto.defaultTarget(sections, vm.importName, vm.importSourceSections) ?: NEW_SECTION) }
     var newName by remember { mutableStateOf(vm.importName) }
     var keep by remember { mutableStateOf(true) }
     Page("Import", snackbar, onBack = { vm.back() }, busy = vm.busy) {
@@ -830,7 +836,12 @@ private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, c
                 }
                 SectionPicker(if (vm.importSourceSections > 0 && keep) "Entries without a section go into:" else "Import into section:",
                     sections, target, { target = it }, tag = "importTarget", extra = listOf(NEW_SECTION to "New section…"))
-                if (target == NEW_SECTION) PlainField(newName, { newName = it }, "Name of the new section", tag = "importNewName")
+                val nameProblem = if (target == NEW_SECTION) ImportInto.newSectionProblem(sections, newName) else null
+                if (target == NEW_SECTION) {
+                    PlainField(newName, { newName = it; vm.importError = null }, "Name of the new section", tag = "importNewName",
+                        isError = nameProblem != null)
+                    nameProblem?.let { ErrorText(it, "importNameError") }
+                }
                 Muted("Entries that already exist in that section with the same service, username and password are skipped. " +
                     "The source is not changed.")
                 ColorButton("Import", {
@@ -841,7 +852,8 @@ private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, c
                     }
                     vm.importMerge(t, keepSections = keep)
                 }, Palette.violet, Modifier.fillMaxWidth().testTag("importMerge"), Icons.Filled.FileDownload,
-                    enabled = !vm.busy && (target != NEW_SECTION || newName.isNotBlank()))
+                    enabled = !vm.busy && nameProblem == null)
+                vm.importError?.let { ErrorText(it, "importError") }
             } else {
                 ColorButton("Create a new vault with them", { vm.importAsNewVault() }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.Add,
                     enabled = !vm.busy)
@@ -852,8 +864,8 @@ private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, c
 
 @Composable
 private fun ExportScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
-    var pw by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
+    var pw by rememberSecret()
+    var confirm by rememberSecret()
     val payload by vm.payload.collectAsState()
     val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
     var which by remember { mutableStateOf(ALL_ENTRIES) }                 // ALL_ENTRIES, "" = No section, or a section id

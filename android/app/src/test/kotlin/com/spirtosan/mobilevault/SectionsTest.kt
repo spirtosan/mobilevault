@@ -202,6 +202,33 @@ class SectionsTest {
         assertEquals(2, one.added)
     }
 
+    /** Task 11 D1: the preselected target never clashes with an existing section. */
+    @Test fun defaultImportTargetPrefersTheExistingSection() {
+        val (p, personal, work) = twoSections()
+        val secs = VaultEdits.sections(p)
+        assertEquals(personal.id, ImportInto.defaultTarget(secs, "Personal", 0))      // personal.vault → existing Personal
+        assertEquals(work.id, ImportInto.defaultTarget(secs, " work ", 0))            // any case, spaces
+        assertEquals(null, ImportInto.defaultTarget(secs, "Old phone", 0))            // → "New section…" Old phone
+        assertEquals("", ImportInto.defaultTarget(emptyList(), "Personal", 0))         // no sections anywhere → No section
+        assertEquals(null, ImportInto.defaultTarget(emptyList(), "Personal", 2))       // the source has sections
+    }
+
+    @Test fun newSectionNameProblems() {
+        val secs = VaultEdits.sections(twoSections().first)
+        assertEquals(null, ImportInto.newSectionProblem(secs, "Old phone"))
+        assertEquals("A section called \"Personal\" already exists — pick it from the list or use another name.",
+            ImportInto.newSectionProblem(secs, " personal"))
+        assertEquals("Enter a name for the new section.", ImportInto.newSectionProblem(secs, "  "))
+        assertTrue(ImportInto.newSectionProblem(secs, "x".repeat(VaultEdits.MAX_NAME + 1))!!.startsWith("Use at most"))
+        // apply() refuses with the same clear message
+        try {
+            ImportInto.apply(twoSections().first, VaultPayload(listOf(e("A"))), ImportInto.Target.New("PERSONAL"), false, t)
+            fail("expected a clash")
+        } catch (x: IllegalArgumentException) {
+            assertEquals("A section called \"Personal\" already exists — pick it from the list or use another name.", x.message)
+        }
+    }
+
     @Test fun newSectionNameFromFile() {
         assertEquals("Work", ImportInto.nameFromFile("work.vault"))
         assertEquals("My personal", ImportInto.nameFromFile("my_personal.pvault"))

@@ -95,7 +95,7 @@ internal fun BiometricSettings(vm: AppViewModel) {
     val unavailable = remember { biometricUnavailableReason(context) }
     val days by vm.biometricDays.collectAsState(BiometricPolicy.DEFAULT_DAYS)
     var askPassword by remember { mutableStateOf(false) }
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Switch(vm.biometricEnabled, { on -> if (on) askPassword = true else vm.disableBiometric() },
             Modifier.testTag("bioSwitch"), enabled = unavailable == null || vm.biometricEnabled,
@@ -137,7 +137,7 @@ internal fun BiometricUnlockButton(vm: AppViewModel) {
 @Composable
 internal fun PracticePasswordCard(vm: AppViewModel) {
     if (!Reminders.practiceDue(vm.reminderTimes, vm.reminderNow()) && !vm.practiceWrong) return
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     var hintShown by remember { mutableStateOf(false) }
     PanelCard(Modifier.testTag("practiceCard"), title = "Practice your master password") {
         Muted("You rarely type it. Type it once now so you don't forget it. Nothing is changed.")

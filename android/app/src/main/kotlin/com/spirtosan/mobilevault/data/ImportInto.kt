@@ -28,7 +28,11 @@ object ImportInto {
             is Target.Existing -> target.id.also { id ->
                 require(VaultEdits.sections(cur).any { it.id == id }) { "That section doesn't exist any more." }
             }
-            is Target.New -> VaultEdits.addSection(cur, target.name.trim().ifEmpty { "Imported" }).let { (p, s) -> cur = p; s.id }
+            is Target.New -> {
+                val name = target.name.trim().ifEmpty { "Imported" }
+                newSectionProblem(VaultEdits.sections(cur), name)?.let { throw IllegalArgumentException(it) }
+                VaultEdits.addSection(cur, name).let { (p, s) -> cur = p; s.id }
+            }
         }
         val targetName = if (targetId.isEmpty()) "No section" else VaultEdits.sectionName(cur, targetId) ?: "?"
         val srcSections = VaultEdits.sections(source)
@@ -41,6 +45,26 @@ object ImportInto {
         val where = if (keep) "their own sections" + (if (targetId.isNotEmpty()) " and $targetName" else "") else targetName
         val text = "Imported ${r.added} entries into $where" + if (r.skipped > 0) " (skipped ${r.skipped} duplicates)" else ""
         return Result(r.payload, r.added, r.skipped, text)
+    }
+
+    /**
+     * Preselected target on the import preview (Task 11): an existing section with the suggested name
+     * ("personal.vault" → "Personal") if there is one, so the default never clashes; otherwise "No section"
+     * when neither vault uses sections; otherwise null = "New section…" with the suggested name.
+     */
+    fun defaultTarget(sections: List<Section>, suggestedName: String, sourceSections: Int): String? {
+        val n = suggestedName.trim()
+        sections.firstOrNull { it.name.trim().equals(n, ignoreCase = true) }?.let { return it.id }
+        return if (sections.isEmpty() && sourceSections == 0) "" else null
+    }
+
+    /** Why [name] can't be used for a new section, or null if it can (same rules as [VaultEdits.addSection]). */
+    fun newSectionProblem(sections: List<Section>, name: String): String? {
+        val n = name.trim()
+        if (n.isEmpty()) return "Enter a name for the new section."
+        if (n.length > VaultEdits.MAX_NAME) return "Use at most ${VaultEdits.MAX_NAME} characters."
+        val clash = sections.firstOrNull { it.name.trim().equals(n, ignoreCase = true) } ?: return null
+        return "A section called \"${clash.name}\" already exists — pick it from the list or use another name."
     }
 
     /** "work.vault" → "Work", "" → "Imported": the prefilled name of a new section. */

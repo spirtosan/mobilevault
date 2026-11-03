@@ -54,8 +54,11 @@ import androidx.compose.material3.TextFieldColors
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -132,7 +135,8 @@ fun Page(
 class Message(override val message: String, val error: Boolean) : SnackbarVisuals {
     override val actionLabel: String? = null
     override val withDismissAction = false
-    override val duration = SnackbarDuration.Short
+    // errors stay longer (Task 11: a short red snackbar looked like "nothing happened")
+    override val duration = if (error) SnackbarDuration.Long else SnackbarDuration.Short
 }
 
 @Composable
@@ -287,6 +291,18 @@ fun fieldColors(): TextFieldColors = OutlinedTextFieldDefaults.colors(
     cursorColor = Palette.orange,
 )
 
+/**
+ * State of a password, recovery-key or pairing-code field (Task 11): kept in memory only (never in the
+ * saved-instance state, unlike rememberSaveable), so it starts empty every time its screen or dialog
+ * opens, and it is emptied when the screen or dialog closes.
+ */
+@Composable
+fun rememberSecret(): MutableState<String> {
+    val state = remember { mutableStateOf("") }
+    DisposableEffect(Unit) { onDispose { state.value = "" } }
+    return state
+}
+
 /** Password input: no autocorrect, password keyboard, amber eye to show/hide. */
 @Composable
 fun PasswordField(
@@ -332,9 +348,10 @@ fun PlainField(
     keyboardType: KeyboardType = KeyboardType.Text,
     tag: String = label,
     leading: ImageVector? = null,
+    isError: Boolean = false,
 ) {
     OutlinedTextField(
-        value = value, onValueChange = onChange, label = { Text(label) }, singleLine = singleLine,
+        value = value, onValueChange = onChange, label = { Text(label) }, singleLine = singleLine, isError = isError,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, autoCorrectEnabled = false),
         leadingIcon = leading?.let { { Icon(it, null, tint = Palette.fgSecondary) } },
         colors = fieldColors(), shape = RoundedCornerShape(10.dp),

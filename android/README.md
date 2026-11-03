@@ -13,7 +13,7 @@ Requirements: JDK 17+. Android Studio's bundled JDK works: `JAVA_HOME="C:/Progra
 ./gradlew :app:connectedDebugAndroidTest    # UI flows on a connected phone (debug app id, own data)
 ./gradlew :app:lintRelease :app:assembleRelease
 ```
-- UI tests (`app/src/androidTest/.../VaultFlowTest.kt`) cover: create → lock → unlock → add entry; recovery key → new password; a lock on the Recovery / Create / Emergency Kit screen; skip / add / remove the recovery key; 5 vs 6 character master password. They wipe the **debug** app's vault (`com.spirtosan.mobilevault.debug`), never the release app's. Gradle uninstalls the debug app after the run.
+- UI tests (`app/src/androidTest/.../VaultFlowTest.kt`) cover: create → lock → unlock → add entry; recovery key → new password; a lock on the Recovery / Create / Emergency Kit screen; skip / add / remove the recovery key; 5 vs 6 character master password. Task 11: import preview preselects an existing section, a clashing name is blocked, the import password field starts empty. Keep the phone in portrait (auto-rotate off) during the run. They wipe the **debug** app's vault (`com.spirtosan.mobilevault.debug`), never the release app's. Gradle uninstalls the debug app after the run.
 - Release APK: the `release` build type has no signing config. For test installs it is signed by hand with the local debug keystore, so updates keep the data:
   ```
   zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk

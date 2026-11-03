@@ -375,6 +375,68 @@ class VaultFlowTest {
         }
     }
 
+    // ── Task 11 Part D: import bugs ─────────────────────────────────────────
+    /**
+     * D1: the section named like the file is preselected (no silent "already exists" failure), a typed clashing
+     * name shows an error and blocks Import, a wrong password shows an error on the screen.
+     * D2: the import password field starts empty every time, also after typing into it and going back.
+     */
+    @Test
+    fun importPreselectsExistingSectionAndPasswordStartsEmpty() {
+        resetVault()
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val desk = "Desk-pass-11"
+        val file = ctx.cacheDir.resolve("task11-import.vault")
+        file.writeBytes(com.spirtosan.mobilevault.crypto.Pvault1.encrypt(desk.toCharArray(),
+            com.spirtosan.mobilevault.crypto.VaultPayload(listOf(
+                com.spirtosan.mobilevault.crypto.Entry(service = "Shop", username = "me", password = "s1"),
+                com.spirtosan.mobilevault.crypto.Entry(service = "Forum", username = "me", password = "f1")))))
+        ActivityScenario.launch(MainActivity::class.java).use { sc ->
+            confirmKit(createUntilKit())
+            // a file Uri has no display name, so the suggested section name is "Imported": make that section exist
+            runBlocking { app.session.update { com.spirtosan.mobilevault.data.VaultEdits.addSection(it, "Imported").first } }
+            val pick = { sc.onActivity { ViewModelProvider(it)[AppViewModel::class.java].importPicked(Uri.fromFile(file)) } }
+
+            pick(); waitFor("importPw")
+            assertEquals("", fieldText("importPw"))
+            tag("importPw").performTextInput("leftover")             // typed, then the owner goes back
+            rule.onNodeWithContentDescription("Back").performClick()
+            pick(); waitFor("importPw")
+            assertEquals("", fieldText("importPw"))                  // a new import starts empty
+
+            tag("importPw").performTextInput("wrong-pass")
+            tag("importOpen").clickAction()
+            waitFor("importError", ms = 30_000)                      // shown on the screen, not only in a snackbar
+            assertEquals("", fieldText("importPw"))                  // cleared after use
+
+            tag("importPw").performTextInput(desk)
+            tag("importOpen").clickAction()
+            waitFor("importCount", ms = 30_000)
+            rule.onNodeWithTag("importTarget").assertTextContains("Imported")        // the existing section, not "New section…"
+            gone("importNewName")
+
+            tag("importTarget").clickAction()
+            waitFor("importTarget:New section…")
+            tag("importTarget:New section…").clickAction()
+            waitFor("importNewName")
+            tag("importNewName").performTextClearance()
+            tag("importNewName").performTextInput("imported")
+            waitFor("importNameError")
+            tag("importMerge").assertIsNotEnabled()
+
+            tag("importTarget").clickAction()
+            waitFor("importTarget:Imported")
+            tag("importTarget:Imported").clickAction()
+            waitFor("importMerge", enabled = true)
+            tag("importMerge").performScrollTo().clickAction()
+            waitFor("add")
+            val p = app.session.payload.value!!
+            val imp = com.spirtosan.mobilevault.data.VaultEdits.sections(p).single { it.name == "Imported" }
+            assertEquals(2, p.activeEntries.count { it.section == imp.id })
+        }
+        file.delete()
+    }
+
     // ── optional recovery key (Part B) ───────────────────────────────────────
     private fun openSettings() {
         rule.onNodeWithContentDescription("Settings").performClick()

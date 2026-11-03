@@ -168,7 +168,7 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 
 @Composable
 internal fun PairingScreen(vm: AppViewModel, snackbar: SnackbarHostState, purpose: PairPurpose) {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSecret()
     val scan = rememberLauncherForActivityResult(ScanContract()) { r ->
         vm.externalDone()
         r.contents?.let { vm.submitPairing(it, purpose) }
@@ -332,8 +332,8 @@ internal fun RestoreListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 internal fun RestoreUnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val h = vm.restoreHeader ?: return
     var useKey by remember { mutableStateOf(false) }
-    var pw by remember { mutableStateOf("") }
-    var key by remember { mutableStateOf("") }
+    var pw by rememberSecret()
+    var key by rememberSecret()
     Page("Unlock the backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
             Text("Revision ${h.rev}, saved ${localTime(h.updated)}", color = Palette.fgPrimary)
@@ -361,7 +361,7 @@ internal fun RestoreUnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
 @Composable
 internal fun HistoryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var confirm by remember { mutableStateOf(false) }
-    var pw by remember { mutableStateOf("") }
+    var pw by rememberSecret()
     Page("Version history", snackbar, onBack = { vm.closePreview(); vm.back() }, busy = vm.busy) {
         val p = vm.preview
         if (p != null) PanelCard(Modifier.testTag("preview"), title = "Revision ${p.rev}") {

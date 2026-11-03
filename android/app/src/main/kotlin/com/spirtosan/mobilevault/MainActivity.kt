@@ -1,6 +1,7 @@
 package com.spirtosan.mobilevault
 
 import android.os.Bundle
+import android.view.View
 import android.view.WindowManager
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
@@ -27,6 +28,8 @@ class MainActivity : FragmentActivity() {
         // with test data. BuildConfig.DEBUG is a constant false in release, so R8 removes the branch.
         val allowScreenshots = BuildConfig.DEBUG && intent.getBooleanExtra("debug_allow_screenshots", false)
         if (!allowScreenshots) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // No autofill (Task 11): other password managers / Google Autofill must neither fill nor read our fields.
+        window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         enableEdgeToEdge()
         setContent {
             // Debug builds: test tags visible to `uiautomator dump` as resource ids, for adb-driven checks.
