@@ -9,9 +9,10 @@ import json
 import os
 import re
 import struct
+import subprocess
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DEFAULT_CONFIG_PATH = "/etc/mvault/config.json"
 
@@ -111,6 +112,29 @@ def pem_to_der(pem: str) -> bytes:
 
 def cert_sha256(pem: str) -> str:
     return sha256_hex(pem_to_der(pem))
+
+
+def cert_not_after(pem: str):
+    """notAfter of a certificate as ISO-8601 UTC ("2029-02-05T12:31:18Z"), or None (openssl CLI)."""
+    try:
+        r = subprocess.run(["openssl", "x509", "-noout", "-enddate"], input=pem, capture_output=True, text=True, timeout=10)
+        s = r.stdout.strip().split("=", 1)[1]                      # "Feb  5 12:31:18 2029 GMT"
+        dt = datetime.strptime(" ".join(s.split()[:4]), "%b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+
+
+def device_cert_until(cfg, d):
+    """Expiry date of a device's client certificate for `mvault-admin list`: stored at pairing (Task 08),
+    otherwise estimated from the pairing time + client_cert_days (marked with "~")."""
+    if d.get("cert_not_after"):
+        return d["cert_not_after"][:10]
+    try:
+        created = datetime.fromisoformat(d["created"].replace("Z", "+00:00"))
+        return "~" + (created + timedelta(days=int(cfg["client_cert_days"]))).date().isoformat()
+    except Exception:
+        return "?"
 
 
 # ── PVAULT2 header ────────────────────────────────────────────────────────────

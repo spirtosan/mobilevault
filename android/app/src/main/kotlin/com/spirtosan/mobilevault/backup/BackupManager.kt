@@ -26,6 +26,13 @@ class BackupManager(filesDir: File, private val keys: DeviceKeys) {
 
     val isPaired get() = _config.value != null
 
+    /** Expiry of this phone's client certificate (`client.pem`), ms; 0 if not paired or unreadable. */
+    private val _certNotAfter = MutableStateFlow(readCertNotAfter())
+    val certNotAfter: StateFlow<Long> = _certNotAfter
+
+    private fun readCertNotAfter(): Long =
+        runCatching { CertExpiry.notAfter(File(dir, "client.pem").readText()) }.getOrNull() ?: 0L
+
     /** Null when not paired, or when the key or token is gone (e.g. data restored without Keystore). */
     fun target(): BackupTarget? {
         val c = _config.value ?: return null
@@ -57,6 +64,7 @@ class BackupManager(filesDir: File, private val keys: DeviceKeys) {
             JsonFiles.write(configFile, c.toJson())
             if (old != null && old.keyAlias != alias) keys.delete(old.keyAlias)
             _config.value = c
+            _certNotAfter.value = readCertNotAfter()
             // A new pairing starts clean; what is on the server is checked by the next upload.
             updateStatus { BackupStatus(testRestoreAt = it.testRestoreAt, testRestoreText = it.testRestoreText) }
             return c
@@ -72,6 +80,7 @@ class BackupManager(filesDir: File, private val keys: DeviceKeys) {
         keys.deleteTokenKey()
         listOf(configFile, tokenFile, File(dir, "client.pem"), File(dir, "ca.pem"), statusFile).forEach { it.delete() }
         _config.value = null
+        _certNotAfter.value = 0L
         _status.value = BackupStatus()
     }
 
@@ -86,7 +95,7 @@ class BackupManager(filesDir: File, private val keys: DeviceKeys) {
     /** Record a failure; 401/403 marks the phone as disconnected. */
     fun recordError(e: BackupException) = updateStatus {
         it.copy(lastError = e.text, disconnected = it.disconnected || e.kind == BackupException.Kind.DISCONNECTED,
-            stopped = !e.retryable)
+            stopped = !e.retryable, tlsFailures = if (e.kind == BackupException.Kind.TLS) it.tlsFailures + 1 else 0)
     }
 
     /** "Test connection": `/health`, then `/latest` for this vault (if there is one). Returns the text to show. */

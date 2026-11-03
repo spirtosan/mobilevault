@@ -28,7 +28,7 @@ There is no `DELETE` (405). Full description: `docs/BACKUP_AND_RECOVERY.md`. Ins
 |---|---|
 | `mvault/common.py` | config, PVAULT2 header check, atomic append-only storage |
 | `mvault/server.py` | HTTP service (loopback only) |
-| `mvault/admin.py` | `init-ca`, `pair`, `list`, `revoke`, `retention`, `stats` |
+| `mvault/admin.py` | `init-ca`, `pair`, `list` (incl. each client certificate's expiry), `revoke`, `retention`, `stats` |
 | `tests/test_mvault.py` | unit/integration tests: `cd server && python3 -m unittest -v` |
 | `tools/mvault_smoke.py` | end-to-end test through nginx/TLS, acting as a phone |
 | `deploy/` | systemd units, nginx site + rate limit, fail2ban filter/jail, config example (placeholders `<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`) |

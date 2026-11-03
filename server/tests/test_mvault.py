@@ -177,6 +177,21 @@ class MvaultTest(unittest.TestCase):
         self.assertEqual(self.req("POST", "/pair", json.dumps({"code": self.new_code("phone4"),
                                                               "csr_pem": "garbage"}))[0], 400)
 
+    def test_cert_expiry_in_list(self):
+        self.pair("phone6")
+        devices = C.devices_store(self.cfg).load()
+        na = datetime.fromisoformat(devices["phone6"]["cert_not_after"].replace("Z", "+00:00"))
+        days = (na - datetime.now(timezone.utc)).total_seconds() / 86400
+        self.assertAlmostEqual(days, self.cfg["client_cert_days"], delta=1)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            admin.cmd_list(self.cfg, None)
+        line = next(l for l in out.getvalue().splitlines() if l.startswith("phone6 "))
+        self.assertIn("valid until " + na.date().isoformat(), line)
+        # devices paired before Task 08 have no stored expiry: estimated from the pairing time
+        self.assertEqual(C.device_cert_until(self.cfg, {"created": "2026-11-03T00:00:00Z"}), "~2029-02-05")
+        self.assertEqual(C.device_cert_until(self.cfg, {}), "?")
+
     def test_pairing_attempt_limit(self):
         code = self.new_code("phone5")
         for _ in range(5):

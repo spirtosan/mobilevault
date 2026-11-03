@@ -23,6 +23,15 @@ data class PairingPayload(val url: String, val code: String, val pins: List<Stri
         /** OkHttp CertificatePinner format: base64 of the SHA-256 of the SubjectPublicKeyInfo. */
         val PIN = Regex("^sha256/[A-Za-z0-9+/]{43}=$")
 
+        const val NO_PINS_TEXT = "This pairing code has no server key pins, so the app can't check that it is talking to your " +
+            "server. Check \"server_cert\" and \"backup_pins\" in the server's config, then run mvault-admin pair again."
+
+        /**
+         * `mvault-admin pair` always includes pins when the server is set up (code review F6): a code without
+         * pins means something is wrong. Release builds refuse it; debug builds ask for confirmation.
+         */
+        fun allowWithoutPins(debugBuild: Boolean) = debugBuild
+
         /** Accepts the bare JSON, or a pasted line around it (e.g. `Payload: {…}`). */
         fun parse(text: String): PairingPayload {
             val start = text.indexOf('{')

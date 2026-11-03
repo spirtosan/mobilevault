@@ -199,6 +199,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** [withRecoveryKey] false: the user chose "Skip" on the recovery-key step. */
     fun createVault(password: CharArray, hint: String, importedPayload: VaultPayload?, withRecoveryKey: Boolean) = work {
+        if (repo.exists()) {                          // code review F4: never replace an existing vault
+            password.wipe()
+            fail("This phone already has a vault. A new vault can only be created when there is none.")
+            return@work
+        }
         val kdf = (calibration ?: withContext(Dispatchers.Default) {
             KdfCalibration.choose(KdfCalibration::measureOnDevice)
         }.also { calibration = it }).params
@@ -505,6 +510,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ── backup server ─────────────────────────────────────────────────────────
     val backupConfig get() = a.backup.config
     val backupStatus get() = a.backup.status
+    val certNotAfter get() = a.backup.certNotAfter
     val vaultRev get() = session.rev
 
     fun backupNow() {
@@ -527,7 +533,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun submitPairing(text: String, purpose: PairPurpose) {
         pairingError = null
         val p = try { PairingPayload.parse(text) } catch (e: PairingPayload.Invalid) { pairingError = e.message; return }
-        if (p.pins.isEmpty()) pairingWithoutPins = p else pair(p, purpose)
+        if (p.pins.isNotEmpty()) pair(p, purpose)
+        else if (PairingPayload.allowWithoutPins(BuildConfig.DEBUG)) pairingWithoutPins = p      // debug: confirm dialog
+        else pairingError = PairingPayload.NO_PINS_TEXT
     }
 
     fun confirmPairingWithoutPins(purpose: PairPurpose) { pairingWithoutPins?.let { pairingWithoutPins = null; pair(it, purpose) } }
@@ -713,10 +721,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun testRestore() = work {
+        if (!session.isUnlocked) return@work           // code review F5: never test with a made-up key
         val id = session.read { it.vaultId } ?: return@work
         val local = session.payload.value?.activeEntries?.size ?: 0
         try {
-            val r = Restore.testRestore(target(), id, { session.read { it.exportDekForBiometric() } ?: ByteArray(32) }, local, session.rev.value)
+            val r = Restore.testRestore(target(), id, { session.read { it.exportDekForBiometric() } ?: throw IllegalStateException("vault is locked") }, local, session.rev.value)
             if (r.ok) {
                 a.backup.updateStatus { it.copy(testRestoreAt = System.currentTimeMillis(), testRestoreText = r.text) }
                 message = "Test restore OK"

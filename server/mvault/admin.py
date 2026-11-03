@@ -100,9 +100,9 @@ def cmd_list(cfg, args):
     if not devices:
         print("no devices")
     for n, d in sorted(devices.items()):
-        print("%-24s %-8s created %s  last seen %s  cert %s…" % (
+        print("%-24s %-8s created %s  last seen %s  cert %s…  valid until %s" % (
             n, "REVOKED" if d.get("revoked") else "active", d.get("created"),
-            d.get("last_seen", "-"), d.get("cert_sha256", "")[:16]))
+            d.get("last_seen", "-"), d.get("cert_sha256", "")[:16], C.device_cert_until(cfg, d)))
 
 
 def cmd_revoke(cfg, args):

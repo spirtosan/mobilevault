@@ -279,6 +279,9 @@ class Handler(BaseHTTPRequestHandler):
             devices[name] = {"cert_sha256": C.cert_sha256(cert_pem),
                              "token_sha256": C.sha256_hex(token.encode("utf-8")),
                              "created": C.now_iso(), "revoked": False}
+            not_after = C.cert_not_after(cert_pem)
+            if not_after:
+                devices[name]["cert_not_after"] = not_after
             dstore.save(devices)
         with open(os.path.join(self.cfg["ca_dir"], "ca.crt"), encoding="ascii") as f:
             ca_pem = f.read()

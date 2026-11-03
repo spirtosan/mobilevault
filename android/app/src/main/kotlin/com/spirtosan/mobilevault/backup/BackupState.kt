@@ -58,6 +58,8 @@ data class BackupStatus(
     /** Wall-clock ms and result of the last "test restore". */
     val testRestoreAt: Long = 0,
     val testRestoreText: String? = null,
+    /** TLS failures (not pin mismatches) in a row; reset by any success. */
+    val tlsFailures: Int = 0,
 ) {
     fun toJson() = JsonObject(buildMap {
         put("last_success_at", JsonPrimitive(lastSuccessAt)); put("last_success_rev", JsonPrimitive(lastSuccessRev))
@@ -66,14 +68,19 @@ data class BackupStatus(
         put("stopped", JsonPrimitive(stopped)); put("disconnected", JsonPrimitive(disconnected))
         put("needs_new_rev", JsonPrimitive(needsNewRev)); put("test_restore_at", JsonPrimitive(testRestoreAt))
         testRestoreText?.let { put("test_restore_text", JsonPrimitive(it)) }
+        put("tls_failures", JsonPrimitive(tlsFailures))
     })
 
     companion object {
+        /** From this many TLS failures in a row the chip shows "Backup error". */
+        const val TLS_RED = 3
+
         fun fromJson(o: JsonObject) = BackupStatus(
             lastSuccessAt = o.long("last_success_at"), lastSuccessRev = o.long("last_success_rev"),
             lastSuccessSha = o.str("last_success_sha") ?: "",
             lastError = o.str("last_error"), stopped = o.bool("stopped"), disconnected = o.bool("disconnected"),
             needsNewRev = o.bool("needs_new_rev"), testRestoreAt = o.long("test_restore_at"), testRestoreText = o.str("test_restore_text"),
+            tlsFailures = o.long("tls_failures").toInt(),
         )
     }
 }

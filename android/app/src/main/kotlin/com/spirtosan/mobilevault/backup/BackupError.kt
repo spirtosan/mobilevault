@@ -20,7 +20,10 @@ class BackupException(val kind: Kind, val text: String, val status: Int = 0) : E
         NETWORK,
         /** The server's key is not one of the pinned keys. Never send anything. */
         PIN_MISMATCH,
-        /** Other TLS failure (certificate chain, handshake). */
+        /**
+         * Other TLS failure (dropped handshake, captive portal, certificate chain). Nothing was sent yet,
+         * so it is retried; from [BackupStatus.TLS_RED] failures in a row the chip turns red.
+         */
         TLS,
         /** Pairing: the one-time code is wrong, expired or used. */
         PAIR_CODE,
@@ -40,7 +43,7 @@ class BackupException(val kind: Kind, val text: String, val status: Int = 0) : E
     }
 
     /** WorkManager should retry with backoff. */
-    val retryable get() = kind == Kind.NETWORK || kind == Kind.SERVER
+    val retryable get() = kind == Kind.NETWORK || kind == Kind.SERVER || kind == Kind.TLS
 }
 
 object BackupErrors {

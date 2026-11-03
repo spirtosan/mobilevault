@@ -53,6 +53,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.spirtosan.mobilevault.backup.BackupErrors
 import com.spirtosan.mobilevault.backup.BackupHealth
+import com.spirtosan.mobilevault.backup.CertExpiry
 import com.spirtosan.mobilevault.backup.RemoteRev
 import com.spirtosan.mobilevault.backup.RemoteVault
 import com.spirtosan.mobilevault.backup.Restore
@@ -104,6 +105,13 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             Text("Server: ${cfg.host}", color = Palette.fgPrimary, modifier = Modifier.testTag("backupHost"))
             Text("This phone: ${cfg.device}", color = Palette.fgPrimary, modifier = Modifier.testTag("backupDevice"))
             Muted("Connected ${localTimeMs(cfg.pairedAt)}. Key in Android Keystore" + if (cfg.strongBox) " (StrongBox)." else ".")
+            val certNotAfter by vm.certNotAfter.collectAsState()
+            if (certNotAfter > 0) {
+                val line = "Certificate valid until ${CertExpiry.date(certNotAfter)}"
+                if (CertExpiry.soon(certNotAfter, System.currentTimeMillis()))
+                    WarnText("$line. Connect this phone again (mvault-admin pair) before then, or backups stop.", "certExpiry")
+                else Muted(line)
+            }
             remember { vm.currentVaultId() }?.let { id ->
                 Text("Vault ID", color = Palette.fgSecondary, style = MaterialTheme.typography.labelMedium)
                 Text(id, color = Palette.fgPrimary, modifier = Modifier.testTag("vaultId"))
@@ -185,9 +193,9 @@ internal fun PairingScreen(vm: AppViewModel, snackbar: SnackbarHostState, purpos
         vm.pairingError?.let { ErrorText(it, "pairError") }
     }
     if (vm.pairingWithoutPins != null) ConfirmDialog(
-        "No server pins",
+        "No server pins (debug build)",
         "This pairing code has no server key pins. The app could then be fooled by anyone with a certificate from a " +
-            "public authority for this name. Only continue if you know why the server has no pins configured.",
+            "public authority for this name. Release builds refuse such a code. Only continue if you know why the server has no pins configured.",
         confirm = "Connect anyway", confirmColor = Palette.red, confirmTag = "noPinsConfirm",
         onConfirm = { vm.confirmPairingWithoutPins(purpose) }, onDismiss = { vm.cancelPairingWithoutPins() },
     )
@@ -200,7 +208,8 @@ internal fun BackupChip(vm: AppViewModel) {
     val st by vm.backupStatus.collectAsState()
     val rev by vm.vaultRev.collectAsState()
     val now by produceState(System.currentTimeMillis()) { while (true) { delay(60_000); value = System.currentTimeMillis() } }
-    val chip = BackupHealth.of(c != null, st, rev, now)
+    val certNotAfter by vm.certNotAfter.collectAsState()
+    val chip = BackupHealth.of(c != null, st, rev, now, certNotAfter)
     val color = when (chip.level) {
         BackupHealth.Level.GREEN -> Palette.green
         BackupHealth.Level.AMBER -> Palette.orange

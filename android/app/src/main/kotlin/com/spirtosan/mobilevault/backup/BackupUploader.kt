@@ -10,8 +10,9 @@ import com.spirtosan.mobilevault.crypto.Pvault2
  * - 409 → same sha256 on the server: success. Different: the server has another file for this rev
  *   (restore of an older version, another device) → [BackupStatus.needsNewRev]; the next unlock
  *   re-seals with `max(local, remote) + 1`. Nothing is ever overwritten.
- * - 401/403 → disconnected, no retries. 413/422/pins/TLS → stopped with the message, no retries.
- * - Network and 5xx → [Outcome.RETRY] (WorkManager backoff).
+ * - 401/403 → disconnected, no retries. 413/422/pin mismatch → stopped with the message, no retries.
+ * - Network, 5xx and other TLS failures → [Outcome.RETRY] (WorkManager backoff). TLS failures are counted
+ *   ([BackupStatus.tlsFailures]); from 3 in a row the chip shows the error.
  */
 class BackupUploader(
     private val target: BackupTarget,
@@ -37,7 +38,7 @@ class BackupUploader(
         } catch (e: BackupException) {
             update {
                 it.copy(lastError = e.text, disconnected = it.disconnected || e.kind == BackupException.Kind.DISCONNECTED,
-                    stopped = !e.retryable)
+                    stopped = !e.retryable, tlsFailures = if (e.kind == BackupException.Kind.TLS) it.tlsFailures + 1 else 0)
             }
             if (e.retryable) Outcome.RETRY else Outcome.STOPPED
         }
@@ -49,7 +50,7 @@ class BackupUploader(
             remote != null && remote.sha256 == sha && (stored == null || stored.sha256 == sha) -> {
                 update {
                     it.copy(lastSuccessAt = clock(), lastSuccessRev = rev,
-                        lastSuccessSha = sha, lastError = null, stopped = false, disconnected = false, needsNewRev = false)
+                        lastSuccessSha = sha, lastError = null, stopped = false, disconnected = false, needsNewRev = false, tlsFailures = 0)
                 }
                 Outcome.SUCCESS
             }

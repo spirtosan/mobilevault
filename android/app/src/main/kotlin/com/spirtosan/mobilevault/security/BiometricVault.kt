@@ -40,6 +40,7 @@ class BiometricVault(filesDir: File) {
             .setKeySize(256)
             .setUserAuthenticationRequired(true)
             .setInvalidatedByBiometricEnrollment(true)
+            .setUnlockedDeviceRequired(true)            // code review L2: unusable while the phone is locked
             .apply {
                 if (Build.VERSION.SDK_INT >= 30) setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
                 else @Suppress("DEPRECATION") setUserAuthenticationValidityDurationSeconds(-1)   // auth per use
