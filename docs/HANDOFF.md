@@ -22,7 +22,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–08 are done; the next new one is 09.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–09 are done; the next new one is 10.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
@@ -48,8 +48,11 @@ Pairing (QR or pasted text → Keystore EC P-256 key → CSR → `POST /pair`), 
 ### Done: Task 08 (2026-11-03): fixes from `docs/CODE_REVIEW_01.md`
 `GET /api/v1/vaults` + vault list on the restore screen; **DEK rotation** on new/removed recovery key and (optional) password change; TLS retry; create/test-restore guards; no pinless pairing in release; client-cert expiry warning; `mvault-admin list` shows cert expiry. Live tests that need the test vault password are still open (STATUS.md).
 
+### Done: Task 09 (2026-11-03): simpler Emergency Kit step + one-click pairing
+Kit step: "Save Emergency Kit as PDF" or "I wrote it down" (no typing test); Settings → Security → "Check my recovery key". Pairing a phone: double-click `tools/windows/Pair phone.cmd` on the owner's PC (SSH login in `%USERPROFILE%\mobilevault-secrets\pair-phone.json`), scan the full-screen QR, Test connection. Fingerprint checks skipped by the owner's decision (reopen only if a problem shows up).
+
 ### Next
-Task 08 live tests, owner checks (camera QR, fingerprint, HyperOS battery).
+Owner check: HyperOS battery settings. Next task: 10.
 
 ### Later
 Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
