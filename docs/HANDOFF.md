@@ -24,7 +24,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–11 are done; the next new one is 12.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–12 are done; the next new one is 13.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
@@ -67,8 +67,11 @@ The release app now holds the owner's real vault (sections Personal / Work, new 
 ### Done: Task 11 (2026-11-03): vault trash, release app handover, import fixes
 `mvault-admin delete-vault` / `undelete-vault` / `trash` (root-only 30-day trash, purged by the retention service); debug test vaults moved to the trash; the permanent release-app rule above; import preview preselects the existing section, clear errors on the import screens, every secret field empty on open and cleared on close, autofill off. Release 0.3.0 installed over the real-vault app.
 
+### Done: Task 12 (2026-11-03): APK + install guide for the owner's wife
+`C:\Users\spirt\mobilevault-release\` (outside git): `MobileVault-0.3.0.apk` + `.sha256`, `INSTALL.txt` (her guide, English, exact screen names), `OWNER_STEPS.txt`. Her phone gets her own vault and is paired as `wife` by the owner. Waiting for the owner to install it with her. On the server her vault will be the one whose last device is `wife`: never delete it either.
+
 ### Next
-Owner: open the release app and check that it unlocks with Personal 35 / Work 6. Owner check: HyperOS battery settings.
+Owner: install Mobile Vault on his wife's phone with her (`OWNER_STEPS.txt`). Owner: open the release app and check that it unlocks with Personal 35 / Work 6. Owner check: HyperOS battery settings.
 
 ### Later
 Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
