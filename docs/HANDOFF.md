@@ -13,8 +13,8 @@ The main goal is **maximum protection against losing passwords**: strong offline
 | Specs | `docs/ANDROID_APP_SPEC.md`, `docs/VAULT_FORMAT_V2.md`, `docs/BACKUP_AND_RECOVERY.md`, `docs/DECISIONS.md` |
 | Server state + hardening log | `docs/SERVER_CHECK.md` |
 | Progress + to-dos | `docs/STATUS.md` |
-| Encryption library (M1, done) | `android/core-crypto` (Kotlin/JVM). Tests: `cd android && gradlew.bat :core-crypto:test` (38) |
-| Android app (M2, Task 06, M3/Task 07 done) | `android/app` (Compose). Build/test/install notes: `android/README.md`. Screenshots: `docs/screenshots/task06/` |
+| Encryption library (M1, done) | `android/core-crypto` (Kotlin/JVM). Tests: `cd android && gradlew.bat :core-crypto:test` (42) |
+| Android app (M2, Task 06, M3/Task 07, Task 08 done) | `android/app` (Compose). Build/test/install notes: `android/README.md`. Screenshots: `docs/screenshots/task06/` |
 | Python reference of PVAULT2 | `android/tools/pvault2.py` |
 | Backup server code | `server/` (Python stdlib). Installed on the server in `/opt/mvault`, config `/etc/mvault/config.json`, admin CLI `mvault-admin` |
 | Backup API | `https://vault.<DOMAIN>/api/v1` (live; smoke test `server/tools/mvault_smoke.py`) |
@@ -22,14 +22,14 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–07 are done; the next new one is 08.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–08 are done; the next new one is 09.**
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
 
 ## 4. Key decisions (details in DECISIONS.md)
 - Kotlin + Jetpack Compose, minSdk 28, app ID `com.spirtosan.mobilevault`, GPL-3.0.
-- Vault format **PVAULT2**: random DEK; slots = password (Argon2id, calibrated per phone, 64 MiB/t3/p4 on the Xiaomi, NFC-normalised) + **optional** recovery key (160-bit, 36 chars Crockford Base32 + checksum, HKDF; owner's choice 2026-11-02); header = GCM AAD; optional plaintext hint; `rev` counter; entry UUIDs + tombstones. Reads desktop **PVAULT1** for import.
+- Vault format **PVAULT2**: random DEK (rotated on recovery-key changes and on request when changing the password, Task 08); slots = password (Argon2id, calibrated per phone, 64 MiB/t3/p4 on the Xiaomi, NFC-normalised) + **optional** recovery key (160-bit, 36 chars Crockford Base32 + checksum, HKDF; owner's choice 2026-11-02); header = GCM AAD; optional plaintext hint; `rev` counter; entry UUIDs + tombstones. Reads desktop **PVAULT1** for import.
 - Backups: **only the own server**, over HTTPS 443 through the existing nginx. Append-only API (no delete/overwrite); mTLS client cert (key in Android Keystore) + bearer token; QR pairing (`mvault-admin pair <name>`, payload has URL, one-time code and SPKI pins incl. the backup pin); `revoke` for lost phones. Retention: last 30 + weekly for 52 weeks; hourly root-owned mirror to the 2nd disk.
 - No Google Drive, no SFTP, SSH is LAN-only (not port-forwarded).
 - Master password: minimum 6 characters, orange warning below 10 or below "Fair" (owner's choice 2026-11-02).
@@ -45,8 +45,11 @@ App MVP on the Xiaomi; Task 06 fixed the recovery-key bug, made the recovery key
 ### Done: Task 07 = M3 (2026-11-03): backup client, biometric unlock, reminders
 Pairing (QR or pasted text → Keystore EC P-256 key → CSR → `POST /pair`), OkHttp 4.12 with mTLS + pins, WorkManager uploads with sha256 verification, health chip, restore (Vault ID → revisions → password/recovery key), version history (rollback as new rev), test restore, fingerprint unlock, practice-password and Emergency Kit cards. Owner checks still open: see STATUS.md. Only the Xiaomi is tested (owner, 2026-11-03).
 
+### Done: Task 08 (2026-11-03): fixes from `docs/CODE_REVIEW_01.md`
+`GET /api/v1/vaults` + vault list on the restore screen; **DEK rotation** on new/removed recovery key and (optional) password change; TLS retry; create/test-restore guards; no pinless pairing in release; client-cert expiry warning; `mvault-admin list` shows cert expiry. Live tests that need the test vault password are still open (STATUS.md).
+
 ### Next
-Owner checks (camera QR, fingerprint, HyperOS battery). Then Task 08 as decided.
+Task 08 live tests, owner checks (camera QR, fingerprint, HyperOS battery).
 
 ### Later
 Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
@@ -74,3 +77,5 @@ Server (future task): stale TURN `external-ip`; restic + off-site backup of the 
 - `AppViewModel`: the `init` block is last on purpose. viewModelScope runs on Main.immediate, so coroutines started in `init` touch properties declared below it.
 - adb UI checks: debug builds expose test tags as resource ids (`uiautomator dump`); dialogs don't, so find them by text. Type into fields with a URI keyboard (`input text`), otherwise HyperOS's keyboard auto-capitalises and adds spaces.
 - Never commit screenshots of the Backup screen: they show the real server name.
+- Git Bash rewrites `/sdcard/...` in adb arguments into Windows paths: set `MSYS_NO_PATHCONV=1` for adb shell commands. The server's Python tests can't run on Windows (`os.link`, directory fsync): run them on the server in a `mktemp -d` dir as `nobody`.
+- Compose dialogs: don't clear a field from an async "wrong password" callback; the user may already be typing again. Clear it on click instead.

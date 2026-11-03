@@ -7,11 +7,13 @@ Scope: `android/core-crypto`, `android/app` (backup, security, data, ViewModel f
 
 Priorities: **Fix now** = goes into Task 08. **Later** = noted, no action yet.
 
+**Status 2026-11-03:** F1–F7 and L2 are done in Task 08 (✅ below; commits 4e50ba2, 1a37c70, 8b9dbcc, 92843d0).
+
 ---
 
 ## Fix now
 
-### F1. The vault key (DEK) never rotates, so the old kit or old password keeps working: medium
+### ✅ F1. The vault key (DEK) never rotates, so the old kit or old password keeps working: medium
 `UnlockedVault.changePassword`, `regenerateRecoveryKey` and `removeRecoveryKey` only re-wrap the **same** DEK. Every older copy of the vault file still has the old slots:
 - server revisions (append-only, kept by retention),
 - local `snapshots/` (20 newest + one per day for 30 days),
@@ -31,28 +33,28 @@ The case where this matters most is "I lost my printed kit", which is exactly wh
 
 Old files still open with the old credentials. That can't be avoided (append-only), and they contain only old data. Fix the success messages so they are honest about this.
 
-### F2. Restore needs the Vault ID, which may exist only on the lost phone: medium (availability)
+### ✅ F2. Restore needs the Vault ID, which may exist only on the lost phone: medium (availability)
 The server has no "list vaults" call, so a new phone must type the Vault ID. The ID is printed on the Emergency Kit, but **a vault created without a recovery key has no kit**. Then the ID exists only on the phone that was lost. Recovery would need SSH to the server and reading directory names.
 
 **Fix:** `GET /api/v1/vaults` (cert + token). It returns one row per vault: `vault_id`, latest rev, time and size, and the device of the latest rev. Vaults aren't scoped per device today (single owner), so listing all of them is consistent. The restore screen shows the list (newest first) and keeps "Enter Vault ID manually" as a fallback. Also show the Vault ID in Settings → Backup with a copy button, if it isn't there already.
 
-### F3. TLS handshake errors stop the upload chain: low
+### ✅ F3. TLS handshake errors stop the upload chain: low
 `BackupErrors.fromIo` maps every `SSLHandshakeException` / `SSLPeerUnverifiedException` to `TLS` (not retryable). A dropped connection during the handshake, or a captive portal, then sets `stopped`, and nothing retries until the app is opened again. Nothing is sent before the handshake completes, so retrying is safe.
 
 **Fix:** keep `PIN_MISMATCH` as stopped. Make other TLS failures retryable (WorkManager backoff). After 3 consecutive TLS failures, show the red "Backup error" chip.
 
-### F4. `createVault` has no "a vault already exists" guard: low
+### ✅ F4. `createVault` has no "a vault already exists" guard: low
 `restoreUnlock` refuses when `repo.exists()`, but `createVault` doesn't. Today it is only reachable from Onboarding, so it's safe, but one future navigation bug would replace the real vault with a new one. The old vault would survive only in snapshots for 30 days and on the server.
 
 **Fix:** the same one-line guard as in restore.
 
-### F5. Test restore with a locked vault uses a zero key: low
+### ✅ F5. Test restore with a locked vault uses a zero key: low
 `testRestore` passes `?: ByteArray(32)` when the vault is locked. The user then sees "could not be decrypted", a false alarm. **Fix:** return early if locked.
 
-### F6. Pairing without pins is still possible after a warning: low
+### ✅ F6. Pairing without pins is still possible after a warning: low
 `mvault-admin pair` always sends pins, because `backup_pins` is configured on the server. A pinless QR therefore means something is wrong. **Fix:** refuse pairing without pins in **release** builds (keep the confirm dialog in debug).
 
-### F7. Client certificate expiry is invisible: low (availability)
+### ✅ F7. Client certificate expiry is invisible: low (availability)
 Client certs are valid for 825 days (`client_cert_days`). The `xiaomi` pairing expires around **February 2029**. After that nginx answers 403, and the app shows "Disconnected": backups stop and only the red chip says so.
 
 **Fix:** read `notAfter` from `backup/client.pem`. Show "Certificate valid until …" in Settings → Backup. From 30 days before expiry, show an amber chip: "Reconnect to the backup server before <date>". Re-pairing already works.
@@ -62,7 +64,7 @@ Client certs are valid for 825 days (`client_cert_days`). The `xiaomi` pairing e
 ## Later (no action now)
 
 - **L1 Clipboard after the process is killed:** the 30 s clear runs in the app's coroutine scope. If HyperOS kills the process before then, the copied password stays on the clipboard until something else replaces it (it is marked sensitive, so it's hidden from previews and keyboards). Possible fix: also schedule a one-shot WorkManager job that clears it. Small risk; leave it.
-- **L2 Biometric key hardening:** add `setUnlockedDeviceRequired(true)` to the fingerprint key. Do it when Task 08 touches `BiometricVault` anyway (one line, no behaviour change in normal use).
+- ✅ **L2 Biometric key hardening:** add `setUnlockedDeviceRequired(true)` to the fingerprint key. Do it when Task 08 touches `BiometricVault` anyway (one line, no behaviour change in normal use).
 - **L3 Pairing crash window:** `BackupManager.pair` writes the new `token.bin` before the new `config.json`. A crash exactly between the two leaves the old config with the new token, so the phone shows "Disconnected" and re-pairing fixes it. Negligible.
 - **L4 Release signing key:** if the release keystore is lost, the app can't be updated, and reinstalling **deletes the local vault**. The server backup still saves the data, but keep the keystore in `mobilevault-secrets` **and** on the offline USB stick (owner check).
 - **L5 Server access is not per device:** any paired, non-revoked device can read every vault's encrypted revisions. That's fine for one owner. If the phone is lost, run `mvault-admin revoke <name>`. That step is already in the docs.
