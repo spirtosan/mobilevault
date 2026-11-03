@@ -85,7 +85,10 @@ class VaultFlowTest {
         ctx.filesDir.resolve("snapshots").deleteRecursively()
         app.session.lock()
         app.backup.disconnect()                                   // never upload test vaults; shows the create step 3
-        runBlocking { app.appSettings.setKitPending(false); app.appSettings.clearFailures() }
+        runBlocking {
+            app.appSettings.setKitPending(false); app.appSettings.clearFailures()
+            app.appSettings.setListSection(com.spirtosan.mobilevault.data.SectionFilter.All)
+        }
     }
 
     /** Lock the way the screen-off receiver or the background timer does. */
@@ -296,6 +299,79 @@ class VaultFlowTest {
             val after = InstrumentationRegistry.getInstrumentation().targetContext.filesDir.resolve("vault.pvault").readBytes()
             assertTrue(before.contentEquals(after))
             runBlocking { app.appSettings.clearFailures() }
+        }
+    }
+
+    // ── sections (Task 10) ───────────────────────────────────────────────────
+    private fun addEntry(service: String) {
+        tag("add").clickAction()
+        waitFor("service")
+        tag("service").performTextInput(service)
+        tag("password").performTextInput("pw-$service")
+        tag("save").performScrollTo().clickAction()
+        waitFor("entry:$service")
+    }
+
+    private fun shown(t: String) = rule.onAllNodes(hasTestTag(t), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
+    /** Split into sections, add an entry into Work, filter by chip, move an entry, delete a section with a move. */
+    @Test
+    fun sectionsFlow() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            confirmKit(createUntilKit())
+            addEntry("Mail")
+            gone("sectionChips")                                      // no sections: the list looks as before
+
+            tag("listMenu").clickAction()
+            waitFor("menuSplit")
+            tag("menuSplit").clickAction()
+            waitFor("splitOk")
+            tag("splitOk").clickAction()                              // "Move all entries into Personal" is on by default
+            waitFor("chip:Work")
+
+            tag("chip:Work").clickAction()
+            rule.waitUntil(5_000) { !shown("entry:Mail") }
+            addEntry("Jira")                                          // a new entry goes into the selected section
+            tag("chip:Personal").clickAction()
+            rule.waitUntil(5_000) { !shown("entry:Jira") }
+            waitFor("entry:Mail")
+
+            // search looks across all sections
+            tag("search").performTextInput("jira")
+            waitFor("entry:Jira")
+            tag("search").performTextClearance()
+
+            // move Mail to Work in the editor
+            tag("entry:Mail").clickAction()
+            waitFor("editEntry")
+            tag("editEntry").performScrollTo().clickAction()
+            waitFor("entrySection")
+            tag("entrySection").performScrollTo().clickAction()
+            waitFor("entrySection:Work")
+            tag("entrySection:Work").clickAction()
+            tag("save").performScrollTo().clickAction()
+            rule.waitUntil(5_000) { !shown("save") }                  // back on the detail screen
+            waitFor("editEntry")
+            rule.onNodeWithContentDescription("Back").performClick()
+            rule.waitUntil(5_000) { shown("chip:Work") }
+            tag("chip:Work").clickAction()
+            waitFor("entry:Mail"); waitFor("entry:Jira")
+
+            // delete Work, moving its entries to Personal: nothing is lost
+            tag("listMenu").clickAction()
+            waitFor("menuSections")
+            tag("menuSections").clickAction()
+            waitFor("deleteSection:Work")
+            tag("deleteSection:Work").clickAction()
+            waitFor("moveTo:Personal")
+            tag("moveTo:Personal").clickAction()
+            tag("deleteSectionOk").clickAction()
+            rule.waitUntil(5_000) { !shown("section:Work") }
+            val p = app.session.payload.value!!
+            assertEquals(listOf("Personal"), com.spirtosan.mobilevault.data.VaultEdits.sections(p).map { it.name })
+            assertEquals(2, p.activeEntries.size)
+            assertTrue(p.activeEntries.all { it.section == com.spirtosan.mobilevault.data.VaultEdits.sections(p)[0].id })
         }
     }
 

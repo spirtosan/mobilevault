@@ -30,6 +30,7 @@ import com.spirtosan.mobilevault.crypto.VaultHeader
 import com.spirtosan.mobilevault.crypto.VaultPayload
 import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.wipe
+import com.spirtosan.mobilevault.data.SectionFilter
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
 import com.spirtosan.mobilevault.security.BiometricPolicy
@@ -41,6 +42,7 @@ import com.spirtosan.mobilevault.security.Reminders
 import com.spirtosan.mobilevault.security.UnlockThrottle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +66,8 @@ sealed interface Screen {
     data class Detail(val id: String) : Screen
     data class Edit(val id: String?) : Screen
     data object Settings : Screen
+    /** Settings → Sections (Task 10). */
+    data object Sections : Screen
     data object ImportPassword : Screen
     data class ImportPreview(val count: Int) : Screen
     data object Export : Screen
@@ -474,6 +478,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         message = "Deleted"
     }
 
+    // ── sections (Task 10) ────────────────────────────────────────────────────
+    /** The section chip selected on the vault list; remembered across restarts (collected in init). */
+    var listSection by mutableStateOf<SectionFilter>(SectionFilter.All); private set
+
+    fun setListSection(f: SectionFilter) = viewModelScope.launch { prefs.setListSection(f) }
+
+    /** Run a section edit; a refused edit (empty or duplicate name …) shows its message instead of "Error: …". */
+    private fun sectionEdit(done: String?, change: (VaultPayload) -> VaultPayload) = work {
+        try {
+            session.update(change)
+            done?.let { message = it }
+        } catch (e: IllegalArgumentException) { fail(e.message ?: "Not possible") }
+    }
+
+    fun addSection(name: String) = sectionEdit("Section \"${name.trim()}\" added") { VaultEdits.addSection(it, name).first }
+    fun renameSection(id: String, name: String) = sectionEdit("Renamed to \"${name.trim()}\"") { VaultEdits.renameSection(it, id, name) }
+    fun moveSection(id: String, delta: Int) = sectionEdit(null) { VaultEdits.moveSection(it, id, delta) }
+
+    /** Delete a section; its entries move to [moveTo] ("" = No section). Entries are never deleted. */
+    fun deleteSection(id: String, moveTo: String) = work {
+        val name = session.payload.value?.let { VaultEdits.sectionName(it, id) } ?: return@work
+        try {
+            session.update { VaultEdits.deleteSection(it, id, moveTo) }
+            val sel = listSection
+            if (sel is SectionFilter.Only && sel.id == id) prefs.setListSection(SectionFilter.All)
+            message = "Section \"$name\" deleted. Its entries were moved, nothing was deleted."
+        } catch (e: IllegalArgumentException) { fail(e.message ?: "Not possible") }
+    }
+
+    /** First-time "Split into sections": Personal + Work, optionally with all current entries in Personal. */
+    fun splitIntoSections(moveAll: Boolean) = work {
+        session.update { p0 ->
+            val (p1, personal) = VaultEdits.addSection(p0, "Personal")
+            val (p2, _) = VaultEdits.addSection(p1, "Work")
+            if (moveAll) VaultEdits.moveEntries(p2, p2.activeEntries.map { it.id }.toSet(), personal.id) else p2
+        }
+        prefs.setListSection(SectionFilter.All)
+        message = "Created the sections Personal and Work" + if (moveAll) "; all entries are in Personal" else ""
+    }
+
     fun toggleFavourite(e: Entry) = work { session.update { VaultEdits.upsert(it, e.copy(favourite = !e.favourite)) } }
 
     fun copy(label: String, text: String) {
@@ -520,10 +564,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         message = "Imported $added entries" + if (skipped > 0) ", skipped $skipped duplicates" else ""
     }
 
-    fun exportTo(uri: Uri, password: CharArray) = work {
+    /** Desktop export (PVAULT1). [sectionId]: null = all entries, else only that section ("" = No section). */
+    fun exportTo(uri: Uri, password: CharArray, sectionId: String? = null) = work {
         try {
             val bytes = withContext(Dispatchers.Default) {
-                Pvault1.encrypt(password, session.payload.value ?: error("locked"))
+                val p = session.payload.value ?: error("locked")
+                Pvault1.encrypt(password, if (sectionId == null) p else VaultEdits.onlySection(p, sectionId))
             }
             withContext(Dispatchers.IO) {
                 getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use { it.write(bytes) }
@@ -910,6 +956,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         screen = if (session.isUnlocked) Screen.VaultList else if (repo.exists()) Screen.Unlock else Screen.Onboarding
         viewModelScope.launch { session.lockEvents.collect { onLocked(it) } }
+        viewModelScope.launch { prefs.listSection.collect { listSection = it } }
         viewModelScope.launch {
             prefs.reminderTimes.collect {
                 val clockMoved = it.debugOffsetMs != reminderTimes.debugOffsetMs

@@ -51,6 +51,7 @@ class AppSettings(private val context: Context) {
         val practiceDismissed = longPreferencesKey("practice_dismissed_at")
         val kitChecked = longPreferencesKey("kit_checked_at")
         val debugClock = longPreferencesKey("debug_clock_offset_ms")
+        val listSection = stringPreferencesKey("list_section")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -144,6 +145,22 @@ class AppSettings(private val context: Context) {
     suspend fun setPracticeDismissed(ms: Long) { context.store.edit { it[K.practiceDismissed] = ms } }
 
     suspend fun setKitChecked(ms: Long) { context.store.edit { it[K.kitChecked] = ms } }
+
+    /** Last section chip on the vault list (Task 10): "all", "none" or "id:<section id>". UI state only. */
+    val listSection: Flow<SectionFilter> = context.store.data.map { p ->
+        val v = p[K.listSection] ?: "all"
+        when {
+            v == "none" -> SectionFilter.None
+            v.startsWith("id:") -> SectionFilter.Only(v.removePrefix("id:"))
+            else -> SectionFilter.All
+        }
+    }
+
+    suspend fun setListSection(f: SectionFilter) {
+        context.store.edit {
+            it[K.listSection] = when (f) { SectionFilter.All -> "all"; SectionFilter.None -> "none"; is SectionFilter.Only -> "id:" + f.id }
+        }
+    }
 
     /** Debug builds only (the UI is hidden in release, and the offset is ignored there). */
     suspend fun setDebugClockOffset(ms: Long) { context.store.edit { if (ms == 0L) it.remove(K.debugClock) else it[K.debugClock] = ms } }

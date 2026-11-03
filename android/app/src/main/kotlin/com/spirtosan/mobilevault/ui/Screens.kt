@@ -11,6 +11,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -92,6 +96,7 @@ import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
 import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.crypto.Entry
+import com.spirtosan.mobilevault.data.SectionFilter
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
 import com.spirtosan.mobilevault.security.KeyChanges
@@ -102,6 +107,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
+
+/** Export screen: "All entries" (not a section id). */
+private const val ALL_ENTRIES = "*all*"
 
 /** Export files for the desktop app keep the old minimum; the master password rule is [MasterPasswordPolicy]. */
 private const val MIN_EXPORT_LENGTH = 8
@@ -130,6 +138,7 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         is Screen.Detail -> DetailScreen(vm, snackbar, s.id)
         is Screen.Edit -> EditScreen(vm, snackbar, s.id)
         Screen.Settings -> SettingsScreen(vm, snackbar)
+        Screen.Sections -> SectionsScreen(vm, snackbar)
         Screen.ImportPassword -> ImportPasswordScreen(vm, snackbar)
         is Screen.ImportPreview -> ImportPreviewScreen(vm, snackbar, s.count)
         Screen.Export -> ExportScreen(vm, snackbar)
@@ -405,13 +414,29 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val payload by vm.payload.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(VaultEdits.Sort.AZ) }
-    val entries = payload?.let { VaultEdits.visible(it, query, sort) }.orEmpty()
+    val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
+    // a remembered chip whose section was deleted meanwhile falls back to "All"
+    val filter = vm.listSection.let { f -> if (f is SectionFilter.Only && sections.none { it.id == f.id }) SectionFilter.All else f }
+    val entries = payload?.let { VaultEdits.visible(it, query, sort, filter) }.orEmpty()
+    val showSectionTag = sections.isNotEmpty() && (filter == SectionFilter.All || query.isNotBlank())
+    val sectionIds = sections.map { it.id }.toSet()
+    var menu by remember { mutableStateOf(false) }
+    var split by remember { mutableStateOf(false) }
     val total = payload?.activeEntries?.size ?: 0
     Page(
         "Mobile Vault", snackbar, busy = vm.busy, scroll = false, titleColor = Palette.orange,
         actions = {
             IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Filled.Settings, "Settings", tint = Palette.fgSecondary) }
             IconButton(onClick = { vm.lockNow() }, Modifier.testTag("lock")) { Icon(Icons.Filled.Lock, "Lock", tint = Palette.red) }
+            Box {
+                IconButton(onClick = { menu = true }, Modifier.testTag("listMenu")) { Icon(Icons.Filled.MoreVert, "More", tint = Palette.fgSecondary) }
+                DropdownMenu(menu, { menu = false }) {
+                    if (sections.isEmpty()) DropdownMenuItem(text = { Text("Split into sections (e.g. Personal / Work)") },
+                        onClick = { menu = false; split = true }, modifier = Modifier.testTag("menuSplit"))
+                    else DropdownMenuItem(text = { Text("Sections…") }, onClick = { menu = false; vm.go(Screen.Sections) },
+                        modifier = Modifier.testTag("menuSections"))
+                }
+            }
         },
         floating = {
             FloatingActionButton(onClick = { vm.go(Screen.Edit(null)) }, containerColor = Palette.green, contentColor = Color.White,
@@ -426,7 +451,9 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             )
         },
     ) {
-        PlainField(query, { query = it }, "Search service, username or URL", tag = "search", leading = Icons.Filled.Search)
+        PlainField(query, { query = it }, if (sections.isEmpty()) "Search service, username or URL" else "Search all sections",
+            tag = "search", leading = Icons.Filled.Search)
+        if (sections.isNotEmpty()) payload?.let { SectionChips(vm, it, sections, filter) }
         ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
         BackupChip(vm)
         TestRestoreCard(vm)
@@ -452,6 +479,7 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         Text(e.service, color = Palette.fgPrimary, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (e.username.isNotEmpty()) Text(e.username, color = Palette.fgSecondary, style = MaterialTheme.typography.bodySmall,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (showSectionTag) SectionTag(sectionLabel(sections, if (e.section in sectionIds) e.section else ""))
                     }
                     if (e.favourite) Icon(Icons.Filled.Star, "Favourite", tint = Palette.orange)
                 }
@@ -459,6 +487,7 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             }
         }
     }
+    if (split) SplitIntoSectionsDialog(vm, total) { split = false }
 }
 
 /** The vault has a recovery key whose Emergency Kit was never confirmed (the app locked on that screen). */
@@ -543,9 +572,12 @@ private fun DetailScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: Stri
             Text("Notes", color = Palette.fgSecondary, style = MaterialTheme.typography.labelMedium)
             Text(e.notes, color = Palette.fgPrimary)
         }
+        payload?.let { p -> VaultEdits.sections(p).takeIf { it.isNotEmpty() }?.let { s ->
+            Muted("Section: ${sectionLabel(s, VaultEdits.effectiveSection(p, e))}")
+        } }
         Muted("Modified ${localTime(e.modified)}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ColorButton("Edit", { vm.go(Screen.Edit(e.id)) }, Palette.blue, Modifier.weight(1f), Icons.Filled.Edit)
+            ColorButton("Edit", { vm.go(Screen.Edit(e.id)) }, Palette.blue, Modifier.weight(1f).testTag("editEntry"), Icons.Filled.Edit)
             ColorButton("Delete", { confirmDelete = true }, Palette.red, Modifier.weight(1f), Icons.Filled.Delete)
         }
     }
@@ -579,6 +611,12 @@ private fun EditScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: String
     var url by remember { mutableStateOf(orig?.url ?: "") }
     var notes by remember { mutableStateOf(orig?.notes ?: "") }
     var fav by remember { mutableStateOf(orig?.favourite ?: false) }
+    val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
+    // a new entry starts in the section selected on the list (or none under "All")
+    var section by remember(id) {
+        mutableStateOf(orig?.let { o -> payload?.let { VaultEdits.effectiveSection(it, o) } } ?: (vm.listSection as? SectionFilter.Only)?.id
+            ?.takeIf { sid -> sections.any { it.id == sid } } ?: "")
+    }
     var showGen by remember { mutableStateOf(false) }
     Page(if (orig == null) "New entry" else "Edit ${orig.service}", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
@@ -590,6 +628,7 @@ private fun EditScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: String
             else MainButton("Generate password", { showGen = true }, Modifier.fillMaxWidth(), Icons.Filled.AutoAwesome)
             PlainField(url, { url = it }, "URL", keyboardType = KeyboardType.Uri)
             PlainField(notes, { notes = it }, "Notes", singleLine = false)
+            if (sections.isNotEmpty()) SectionPicker("Section", sections, section, { section = it }, tag = "entrySection")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(fav, { fav = it }, colors = SwitchDefaults.colors(checkedTrackColor = Palette.orange, checkedThumbColor = Palette.onOrange))
                 Spacer(Modifier.width(10.dp)); Text("Favourite", color = Palette.fgPrimary)
@@ -598,7 +637,7 @@ private fun EditScreen(vm: AppViewModel, snackbar: SnackbarHostState, id: String
         MainButton("Save", {
             val base = orig ?: Entry(service = service.trim(), password = password)
             vm.saveEntry(base.copy(service = service.trim(), username = username.trim(), password = password,
-                url = url.trim(), notes = notes, favourite = fav))
+                url = url.trim(), notes = notes, favourite = fav, section = section))
         }, Modifier.fillMaxWidth().testTag("save"), Icons.Filled.Save, enabled = service.isNotBlank() && password.isNotEmpty() && !vm.busy)
     }
 }
@@ -678,6 +717,11 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 ColorButton("Create recovery key", { addKey = true }, Palette.green, Modifier.fillMaxWidth().testTag("addRecoveryKey"), Icons.Filled.Key)
             }
         }
+        PanelCard(title = "Sections") {
+            val n = vm.payload.collectAsState().value?.let { VaultEdits.sections(it).size } ?: 0
+            Muted(if (n == 0) "Split this vault into sections, e.g. Personal and Work." else "$n sections.")
+            ColorButton("Sections", { vm.go(Screen.Sections) }, Palette.steel, Modifier.fillMaxWidth().testTag("toSections"), Icons.Filled.Folder)
+        }
         PanelCard(title = "Backup") {
             BackupSummary(vm)
             ColorButton("Backup settings", { vm.go(Screen.Backup) }, Palette.steel, Modifier.fillMaxWidth().testTag("toBackup"), Icons.Filled.CloudUpload)
@@ -731,19 +775,28 @@ private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, c
 private fun ExportScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var pw by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
+    val payload by vm.payload.collectAsState()
+    val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
+    var which by remember { mutableStateOf(ALL_ENTRIES) }                 // ALL_ENTRIES, "" = No section, or a section id
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         vm.externalDone()
-        if (uri != null) { vm.exportTo(uri, pw.toCharArray()); pw = ""; confirm = "" }
+        if (uri != null) { vm.exportTo(uri, pw.toCharArray(), which.takeIf { it != ALL_ENTRIES }); pw = ""; confirm = "" }
     }
+    val fileName = if (which == ALL_ENTRIES) "mobilevault-export.vault"
+        else "mobilevault-" + sectionLabel(sections, which).lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-') + ".vault"
     Page("Export for desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
             Text("Creates a file the desktop app (Shu PassVault) can open.", color = Palette.fgPrimary)
             WarnText("Notes, tags and favourites are not part of the desktop format and are left out.")
+            if (sections.isNotEmpty()) {
+                SectionPicker("Export", sections, which, { which = it }, tag = "exportWhich", extra = listOf(ALL_ENTRIES to "All entries"))
+                Muted("The desktop app has no sections: exporting one section gives a separate desktop file.")
+            }
             Muted("Choose a password for the exported file. Anyone with the file and this password can read all entries.")
             PasswordField(pw, { pw = it }, "Export password")
             StrengthMeter(pw)
             PasswordField(confirm, { confirm = it }, "Repeat export password", isError = confirm.isNotEmpty() && confirm != pw)
-            MainButton("Choose where to save", { vm.externalStarted(); save.launch("mobilevault-export.vault") },
+            MainButton("Choose where to save", { vm.externalStarted(); save.launch(fileName) },
                 Modifier.fillMaxWidth(), Icons.Filled.Save, enabled = pw.length >= MIN_EXPORT_LENGTH && pw == confirm && !vm.busy)
         }
     }
