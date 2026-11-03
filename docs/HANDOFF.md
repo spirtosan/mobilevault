@@ -2,7 +2,7 @@
 
 _Last updated: 2026-11-03. Read this first, then `docs/STATUS.md`._
 
-> **Permanent rule (owner, 2026-11-03; copy it into every future task's Rules):** **The release app (`com.spirtosan.mobilevault`) holds the owner's real vault.** Never open, unlock, read, back up, restore over, clear, uninstall, re-pair or disconnect it, and never take screenshots of it. The only exception is installing a newer release build **over** it (same signing key, `adb install -r`), which keeps its data. All tests use the **debug app** (`com.spirtosan.mobilevault.debug`) with test data only. The old test password is retired; don't use it on the release app. On the server, the device `xiaomi` (the release app) stays active and untouched, and the owner's real vault `274cdb88-…` is never deleted, trashed, restored or read. The same protection for the owner's wife's vault `85ed3926…` and her device `ljuba` (paired 2026-11-03): never delete, trash, restore or revoke them.
+> **Permanent rule (owner, 2026-11-03; copy it into every future task's Rules):** **The release app (`com.spirtosan.mobilevault`) holds the owner's real vault.** Never open, unlock, read, back up, restore over, clear, uninstall, re-pair or disconnect it, and never take screenshots of it. The only exception is installing a newer release build **over** it (same signing key, `adb install -r`), which keeps its data. All tests use the **debug app** (`com.spirtosan.mobilevault.debug`) with test data only. The old test password is retired; don't use it on the release app. On the server, the device `xiaomi` (the release app) stays active and untouched, and the owner's real vault `274cdb88-…` is never deleted, trashed, restored or read. The same protection for the owner's wife's vault `85ed3926…` and her device `<WIFE_DEVICE>` (paired 2026-11-03): never delete, trash, restore or revoke them.
 
 ## 1. What this project is
 **Mobile Vault** is an Android password manager for one owner (non-commercial, GPL-3.0). It is based on the desktop app **Shu PassVault** (`C:\Users\spirt\passvault`, Python/Tkinter; copy in `reference/desktop-passvault/`).
@@ -68,7 +68,7 @@ The release app now holds the owner's real vault (sections Personal / Work, new 
 `mvault-admin delete-vault` / `undelete-vault` / `trash` (root-only 30-day trash, purged by the retention service); debug test vaults moved to the trash; the permanent release-app rule above; import preview preselects the existing section, clear errors on the import screens, every secret field empty on open and cleared on close, autofill off. Release 0.3.0 installed over the real-vault app.
 
 ### Done: Task 12 (2026-11-03): APK + install guide for the owner's wife
-`C:\Users\spirt\mobilevault-release\` (outside git): `MobileVault-0.3.0.apk` + `.sha256`, `INSTALL.txt` (her guide, English, exact screen names), `OWNER_STEPS.txt`. Her phone has her own vault and was paired by the owner on 2026-11-03 as device `ljuba` (a later new phone: `ljuba-2`); her vault `85ed3926…` uploaded r1. Protected like the owner's vault (permanent rule).
+`C:\Users\spirt\mobilevault-release\` (outside git): `MobileVault-0.3.0.apk` + `.sha256`, `INSTALL.txt` (her guide, English, exact screen names), `OWNER_STEPS.txt`. Her phone has her own vault and was paired by the owner on 2026-11-03 as device `<WIFE_DEVICE>` (a later new phone: `<WIFE_DEVICE>-2`); her vault `85ed3926…` uploaded r1. Protected like the owner's vault (permanent rule).
 
 ### Next
 Owner: open the release app and check that it unlocks with Personal 35 / Work 6. Owner check: HyperOS battery settings.
