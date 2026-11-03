@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -96,6 +98,7 @@ import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
 import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.crypto.Entry
+import com.spirtosan.mobilevault.data.ImportInto
 import com.spirtosan.mobilevault.data.SectionFilter
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
@@ -107,6 +110,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
+
+/** Import preview: "New section…" (not a section id). */
+private const val NEW_SECTION = "*new*"
 
 /** Export screen: "All entries" (not a section id). */
 private const val ALL_ENTRIES = "*all*"
@@ -140,6 +146,8 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         Screen.Settings -> SettingsScreen(vm, snackbar)
         Screen.Sections -> SectionsScreen(vm, snackbar)
         Screen.ImportPassword -> ImportPasswordScreen(vm, snackbar)
+        Screen.ImportServer -> ImportServerScreen(vm, snackbar)
+        Screen.ImportServerRevs -> ImportServerRevsScreen(vm, snackbar)
         is Screen.ImportPreview -> ImportPreviewScreen(vm, snackbar, s.count)
         Screen.Export -> ExportScreen(vm, snackbar)
         Screen.About -> AboutScreen(vm, snackbar)
@@ -727,7 +735,12 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             ColorButton("Backup settings", { vm.go(Screen.Backup) }, Palette.steel, Modifier.fillMaxWidth().testTag("toBackup"), Icons.Filled.CloudUpload)
         }
         PanelCard(title = "Import / Export") {
-            ColorButton("Import from desktop (merge)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload)
+            Muted("Import another vault into this one, e.g. into its own section.")
+            ColorButton("Import a file (desktop or Mobile Vault)", pickImport, Palette.violet, Modifier.fillMaxWidth().testTag("importFile"),
+                Icons.Filled.FileDownload)
+            val paired = vm.backupConfig.collectAsState().value != null
+            ColorButton("Import from the backup server", { vm.openImportFromServer() }, Palette.violet,
+                Modifier.fillMaxWidth().testTag("importServer"), Icons.Filled.CloudDownload, enabled = paired && !vm.busy)
             ColorButton("Export for desktop", { vm.go(Screen.Export) }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileUpload)
         }
         if (BuildConfig.DEBUG) DebugClockCard(vm)
@@ -743,26 +756,92 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 @Composable
 private fun ImportPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var pw by remember { mutableStateOf("") }
-    val submit = { vm.importDecrypt(pw.toCharArray()); pw = "" }
-    Page("Import from desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+    var key by remember { mutableStateOf("") }
+    var useKey by remember { mutableStateOf(false) }
+    val h = vm.importHeader
+    val submit = {
+        if (!vm.busy) { if (useKey) vm.importDecrypt(null, key) else if (pw.isNotEmpty()) vm.importDecrypt(pw.toCharArray()); pw = "" }
+    }
+    Page(if (vm.importIsMobile) "Import a Mobile Vault" else "Import from desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
-            Muted("Enter the password of the desktop vault file.")
-            PasswordField(pw, { pw = it }, "Desktop vault password", imeAction = ImeAction.Go, onDone = submit)
-            MainButton("Open file", submit, Modifier.fillMaxWidth(), Icons.Filled.FolderOpen, enabled = pw.isNotEmpty() && !vm.busy)
+            if (!vm.importIsMobile) {
+                Muted("Enter the password of the desktop vault file.")
+                PasswordField(pw, { pw = it }, "Desktop vault password", tag = "importPw", imeAction = ImeAction.Go, onDone = submit)
+            } else {
+                Muted("This is another Mobile Vault (saved ${h?.updated?.let { localTime(it) } ?: "?"}). It is opened in memory only, " +
+                    "with ITS master password or recovery key, and is not changed.")
+                if (!useKey) {
+                    PasswordField(pw, { pw = it }, "Master password of that vault", tag = "importPw", imeAction = ImeAction.Go, onDone = submit)
+                    h?.hint?.let { Muted("Hint: $it") }
+                } else KeyField(key, { key = it }, "Recovery key of that vault", tag = "importKey")
+                if (h?.hasRecoveryKey == true) TextButton(onClick = { useKey = !useKey }) {
+                    Text(if (useKey) "Use its master password instead" else "Use its recovery key instead", color = Palette.navFg)
+                }
+            }
+            MainButton("Open", submit, Modifier.fillMaxWidth().testTag("importOpen"), Icons.Filled.FolderOpen,
+                enabled = (if (useKey) key.isNotBlank() else pw.isNotEmpty()) && !vm.busy)
         }
+    }
+}
+
+/** Import from the backup server, step 1: another vault (the open one is not listed). */
+@Composable
+private fun ImportServerScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    Page("Import from the server", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+        if (vm.importVaults.isEmpty()) WarnText("The server has no other vaults.")
+        else Muted("Other vaults backed up on your server. Pick the one to import.")
+        vm.importVaults.forEach { v -> VaultRow(v) { vm.pickImportVault(v.vaultId) } }
+    }
+}
+
+/** Import from the backup server, step 2: a revision (the newest is usually right). */
+@Composable
+private fun ImportServerRevsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    Page("Choose a version", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+        Muted("The newest version is usually the right one.")
+        vm.remoteRevs.forEachIndexed { i, r -> RevisionRow(r, i == 0) { vm.pickImportRevision(r.rev) } }
     }
 }
 
 @Composable
 private fun ImportPreviewScreen(vm: AppViewModel, snackbar: SnackbarHostState, count: Int) {
-    val unlocked = vm.payload.collectAsState().value != null
-    Page("Import from desktop", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+    val payload by vm.payload.collectAsState()
+    val unlocked = payload != null
+    val sections = payload?.let { VaultEdits.sections(it) }.orEmpty()
+    // default target: a new section named after the file ("Work"), unless the vault doesn't use sections and the source has none
+    var target by remember { mutableStateOf(if (sections.isEmpty() && vm.importSourceSections == 0) "" else NEW_SECTION) }
+    var newName by remember { mutableStateOf(vm.importName) }
+    var keep by remember { mutableStateOf(true) }
+    Page("Import", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
-            Text("The file contains $count entries.", color = Palette.fgPrimary, style = MaterialTheme.typography.titleMedium)
+            Text("The file contains $count entries.", color = Palette.fgPrimary, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.testTag("importCount"))
             if (unlocked) {
-                Muted("Entries that already exist with the same service, username and password are skipped.")
-                ColorButton("Merge into this vault", { vm.importMerge() }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload,
-                    enabled = !vm.busy)
+                if (vm.importSourceSections > 0) {
+                    Muted("That vault has ${vm.importSourceSections} sections of its own.")
+                    Row(Modifier.fillMaxWidth().clickable { keep = true }.testTag("importKeep"), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(keep, { keep = true }, colors = RadioButtonDefaults.colors(selectedColor = Palette.orange))
+                        Text("Keep its sections", color = Palette.fgPrimary)
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { keep = false }.testTag("importOneSection"), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(!keep, { keep = false }, colors = RadioButtonDefaults.colors(selectedColor = Palette.orange))
+                        Text("Put everything into one section", color = Palette.fgPrimary)
+                    }
+                }
+                SectionPicker(if (vm.importSourceSections > 0 && keep) "Entries without a section go into:" else "Import into section:",
+                    sections, target, { target = it }, tag = "importTarget", extra = listOf(NEW_SECTION to "New section…"))
+                if (target == NEW_SECTION) PlainField(newName, { newName = it }, "Name of the new section", tag = "importNewName")
+                Muted("Entries that already exist in that section with the same service, username and password are skipped. " +
+                    "The source is not changed.")
+                ColorButton("Import", {
+                    val t = when (target) {
+                        NEW_SECTION -> ImportInto.Target.New(newName)
+                        "" -> ImportInto.Target.NoSection
+                        else -> ImportInto.Target.Existing(target)
+                    }
+                    vm.importMerge(t, keepSections = keep)
+                }, Palette.violet, Modifier.fillMaxWidth().testTag("importMerge"), Icons.Filled.FileDownload,
+                    enabled = !vm.busy && (target != NEW_SECTION || newName.isNotBlank()))
             } else {
                 ColorButton("Create a new vault with them", { vm.importAsNewVault() }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.Add,
                     enabled = !vm.busy)

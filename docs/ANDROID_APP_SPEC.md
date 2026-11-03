@@ -65,7 +65,9 @@ Forgetting the master password is the most likely way to lose everything, especi
 3. Unlock: password field, biometric button; "Forgot password? Use recovery key" only when the vault has a recovery slot
 4. Vault list: search bar, entries, FAB "+", backup status chip
 5. Entry detail / edit (same fields as desktop + notes), generator button
-6. Settings: security (auto-lock, clipboard, biometrics, check my recovery key, change password), recovery key (create / new / remove; without one a permanent "No recovery key" warning), backups (targets, history, restore, test restore), import/export, about
+6. Settings: security (auto-lock, clipboard, biometrics, check my recovery key, change password), recovery key (create / new / remove; without one a permanent "No recovery key" warning), sections (Task 10), backups (targets, history, restore, test restore), import/export, about
+7. Sections (Task 10): one vault, one master password, one recovery key, one backup. Without sections nothing changes in the UI. With sections: chip row All / Personal / Work / … on the list (remembered), search across all sections, Section dropdown in the editor, Settings → Sections (add, rename, reorder, delete with "move its entries to …"), list menu "Split into sections (e.g. Personal / Work)". Export for desktop: all entries or one section.
+8. Import into a section (Task 10, needs an open vault): Settings → Import → "Import a file" (desktop PVAULT1 or a Mobile Vault PVAULT2 file, told apart by the magic bytes) or "Import from the backup server" (another vault from `GET /vaults`, a revision, newest first). A PVAULT2 source is opened in memory with its own master password or recovery key and never saved as a vault. Preview → "Import into section:" existing / New section… (name from the file) / No section; a source with sections can "Keep its sections" (suffix on clashes). Duplicates (service + username + password) are skipped within the target section; imported entries get new ids and keep notes, tags and favourites. The source is never changed.
 
 ## Suggested module layout
 ```

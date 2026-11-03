@@ -5,6 +5,7 @@ import com.spirtosan.mobilevault.crypto.Entry
 import com.spirtosan.mobilevault.crypto.Pvault1
 import com.spirtosan.mobilevault.crypto.Pvault2
 import com.spirtosan.mobilevault.crypto.VaultPayload
+import com.spirtosan.mobilevault.data.ImportInto
 import com.spirtosan.mobilevault.data.Section
 import com.spirtosan.mobilevault.data.SectionFilter
 import com.spirtosan.mobilevault.data.VaultEdits
@@ -164,6 +165,48 @@ class SectionsTest {
         assertEquals(3, r.added)                                               // Jira is new in "Work (2)", not a dup of Work
         assertEquals(listOf(map["a"], map["b"], ""), r.payload.entries.takeLast(3).map { it.section })
         assertTrue(r.payload.entries.none { it.section == work.id && it.service == "Hotel" })
+    }
+
+    // ── ImportInto (Part C) ──
+    @Test fun importIntoNewExistingOrNoSection() {
+        val (p, personal, work) = twoSections()
+        val src = VaultPayload(listOf(e("Jira"), e("Wiki"), e("Bank", p = "pw-Bank")))
+        val a = ImportInto.apply(p, src, ImportInto.Target.New("Work-test"), keepSections = false, time = t)
+        val wt = VaultEdits.sections(a.payload).last()
+        assertEquals("Work-test", wt.name)
+        assertEquals(3, a.added)
+        assertEquals("Imported 3 entries into Work-test", a.text)
+        assertTrue(a.payload.entries.takeLast(3).all { it.section == wt.id })
+
+        val b = ImportInto.apply(p, src, ImportInto.Target.Existing(work.id), keepSections = false, time = t)
+        assertEquals(2, b.added); assertEquals(1, b.skipped)                  // Jira exists in Work
+        assertEquals("Imported 2 entries into Work (skipped 1 duplicates)", b.text)
+
+        val c = ImportInto.apply(p, src, ImportInto.Target.NoSection, keepSections = false, time = t)
+        assertEquals(3, c.added)                                               // Bank is in Personal, not in "No section"
+        throws<IllegalArgumentException> { ImportInto.apply(p, src, ImportInto.Target.New("work"), false) }      // name clash
+        throws<IllegalArgumentException> { ImportInto.apply(p, src, ImportInto.Target.Existing("gone"), false) }
+        assertEquals(personal.id, VaultEdits.sections(p)[0].id)
+    }
+
+    @Test fun importKeepingTheSourceSections() {
+        val (p, _, _) = twoSections()
+        val (s1, srcWork) = VaultEdits.addSection(VaultPayload(), "Work")
+        val src = s1.copy(entries = listOf(e("Jira", sec = srcWork.id), e("Loose2")))
+        val keep = ImportInto.apply(p, src, ImportInto.Target.New("Old phone"), keepSections = true, time = t)
+        assertEquals(listOf("Personal", "Work", "Old phone", "Work (2)"), VaultEdits.sections(keep.payload).map { it.name })
+        val names = VaultEdits.sections(keep.payload).associate { it.id to it.name }
+        assertEquals(listOf("Work (2)", "Old phone"), keep.payload.entries.takeLast(2).map { names[it.section] })
+        val one = ImportInto.apply(p, src, ImportInto.Target.New("Old phone"), keepSections = false, time = t)
+        assertEquals(listOf("Personal", "Work", "Old phone"), VaultEdits.sections(one.payload).map { it.name })
+        assertEquals(2, one.added)
+    }
+
+    @Test fun newSectionNameFromFile() {
+        assertEquals("Work", ImportInto.nameFromFile("work.vault"))
+        assertEquals("My personal", ImportInto.nameFromFile("my_personal.pvault"))
+        assertEquals("Imported", ImportInto.nameFromFile(null))
+        assertEquals("Imported", ImportInto.nameFromFile(".vault"))
     }
 
     @Test fun exportOnlyOneSectionIsDesktopCompatible() {

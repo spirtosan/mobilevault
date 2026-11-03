@@ -284,7 +284,7 @@ internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 
 /** One vault on the server: "Vault 1a2b…, revision 42" / "3 Nov 2026, 10:00 · from xiaomi". */
 @Composable
-private fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
+internal fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Palette.bgPanel, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp).testTag("vault:${v.vaultId}"),
@@ -304,7 +304,7 @@ private fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
 
 /** One server revision as a tappable row. */
 @Composable
-private fun RevisionRow(r: RemoteRev, newest: Boolean, onClick: () -> Unit) {
+internal fun RevisionRow(r: RemoteRev, newest: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(Palette.bgPanel, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp).testTag("rev:${r.rev}"),

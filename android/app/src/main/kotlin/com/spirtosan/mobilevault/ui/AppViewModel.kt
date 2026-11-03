@@ -30,6 +30,7 @@ import com.spirtosan.mobilevault.crypto.VaultHeader
 import com.spirtosan.mobilevault.crypto.VaultPayload
 import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.wipe
+import com.spirtosan.mobilevault.data.ImportInto
 import com.spirtosan.mobilevault.data.SectionFilter
 import com.spirtosan.mobilevault.data.Settings
 import com.spirtosan.mobilevault.data.VaultEdits
@@ -69,6 +70,9 @@ sealed interface Screen {
     /** Settings → Sections (Task 10). */
     data object Sections : Screen
     data object ImportPassword : Screen
+    /** Import from the backup server (Task 10): pick another vault, then a revision. */
+    data object ImportServer : Screen
+    data object ImportServerRevs : Screen
     data class ImportPreview(val count: Int) : Screen
     data object Export : Screen
     data object About : Screen
@@ -180,7 +184,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         kit?.key?.wipe()
         kit = null
         kitPending = false
-        importBytes?.wipe(); importBytes = null; imported = null
+        importBytes?.wipe(); importBytes = null; imported = null; importHeader = null
         busy = false
         replace(if (repo.exists()) Screen.Unlock else Screen.Onboarding)
     }
@@ -528,25 +532,101 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateSettings(s: Settings) = viewModelScope.launch { prefs.update(s) }
 
-    // ── import / export (desktop PVAULT1) ─────────────────────────────────────
+    // ── import (desktop PVAULT1, Mobile Vault PVAULT2 file or server vault) / export ──
+    /** The import source is a Mobile Vault (PVAULT2) file or server vault, not a desktop file. */
+    var importIsMobile by mutableStateOf(false); private set
+    /** PVAULT2 source: its (unauthenticated) header, for the recovery-key option and the hint. */
+    var importHeader by mutableStateOf<VaultHeader?>(null); private set
+    /** Prefilled name of a new section ("work.vault" → "Work"). */
+    var importName by mutableStateOf("Imported"); private set
+    /** The decrypted source has its own sections ("Keep its sections"). */
+    var importSourceSections by mutableStateOf(0); private set
+    private var importFromServer = false
+
+    private fun displayName(uri: Uri): String? = runCatching {
+        getApplication<Application>().contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }.getOrNull()
+
+    /** A file was picked: desktop vault (PVAULT1) or Mobile Vault file (PVAULT2), told apart by its magic bytes. */
     fun importPicked(uri: Uri) = work {
-        importBytes = withContext(Dispatchers.IO) {
+        val raw = withContext(Dispatchers.IO) {
             getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes() }
         }
-        go(Screen.ImportPassword)
+        if (!startImport(raw, ImportInto.nameFromFile(displayName(uri)), fromServer = false)) raw.wipe()
     }
 
-    fun importDecrypt(password: CharArray) = work {
+    private fun startImport(raw: ByteArray, name: String, fromServer: Boolean): Boolean {
+        importHeader = null
+        if (Pvault2.isPvault2(raw)) {
+            if (!session.isUnlocked) {
+                fail("A Mobile Vault file is imported into an open vault (Settings → Import). On a new phone, use Restore from backup.")
+                return false
+            }
+            val h = try { Pvault2.peekHeader(raw) } catch (e: VaultFormatException) { fail("This Mobile Vault file is damaged: ${e.message}"); return false }
+            if (h.vaultId == localVaultId()) { fail("This is the vault that is open now. Pick another vault."); return false }
+            importHeader = h
+            importIsMobile = true
+        } else importIsMobile = false
+        importBytes?.wipe()
+        importBytes = raw
+        importName = name
+        importFromServer = fromServer
+        go(Screen.ImportPassword)
+        return true
+    }
+
+    /** Open the source in memory: desktop password, or the PVAULT2 vault's own master password or recovery key. */
+    fun importDecrypt(password: CharArray?, recoveryKeyText: String? = null) = work {
         val raw = importBytes ?: return@work
         try {
-            val p = withContext(Dispatchers.Default) { Pvault1.decrypt(password, raw) }
+            val p = withContext(Dispatchers.Default) {
+                when {
+                    !importIsMobile -> Pvault1.decrypt(password ?: CharArray(0), raw)
+                    password != null -> Pvault2.unlockWithPassword(raw, password).let { v -> v.payload.also { v.wipe() } }
+                    else -> Pvault2.unlockWithRecoveryKey(raw, RecoveryKey.parse(recoveryKeyText ?: "")).let { v -> v.payload.also { v.wipe() } }
+                }
+            }
             imported = p
+            importSourceSections = VaultEdits.sections(p).size
             screen = Screen.ImportPreview(p.activeEntries.size)
         } catch (e: WrongKeyException) {
-            fail("Wrong password for this file")
+            fail(if (password != null) "Wrong password for this vault" else "This recovery key does not open this vault")
+        } catch (e: IllegalArgumentException) {
+            fail(e.message ?: "That is not a valid recovery key")
         } catch (e: VaultFormatException) {
-            fail("Not a desktop vault file: ${e.message}")
-        } finally { password.wipe() }
+            fail((if (importIsMobile) "Can't open this Mobile Vault file: " else "Not a desktop vault file: ") + e.message)
+        } finally { password?.wipe() }
+    }
+
+    // import from the backup server
+    var importVaults by mutableStateOf<List<RemoteVault>>(emptyList()); private set
+    private var importVaultId: String? = null
+
+    fun openImportFromServer() = work {
+        val own = localVaultId()
+        try {
+            val list = Restore.vaultsOrNull(target())
+                ?: run { fail("The server is too old to list its vaults (Task 08)."); return@work }
+            importVaults = list.filter { it.vaultId != own }
+            go(Screen.ImportServer)
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    fun pickImportVault(id: String) = work {
+        try {
+            remoteRevs = Restore.newestFirst(target().list(id))
+            importVaultId = id
+            go(Screen.ImportServerRevs)
+        } catch (e: BackupException) { fail(e.text) }
+    }
+
+    fun pickImportRevision(rev: Long) = work {
+        val id = importVaultId ?: return@work
+        try {
+            val raw = Restore.fetch(target(), id, rev)
+            startImport(raw, "Imported", fromServer = true)
+        } catch (e: BackupException) { fail(e.text) }
     }
 
     fun importAsNewVault() {
@@ -555,13 +635,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         replace(Screen.Create(p))
     }
 
-    fun importMerge() = work {
+    /** Merge the decrypted source into the open vault; saved and backed up like any change. The source is not touched. */
+    fun importMerge(target: ImportInto.Target = ImportInto.Target.NoSection, keepSections: Boolean = false) = work {
         val p = imported ?: return@work
-        var added = 0; var skipped = 0
-        session.update { cur -> VaultEdits.mergeImport(cur, p.entries).also { added = it.added; skipped = it.skipped }.payload }
-        importBytes = null; imported = null
+        var text = ""
+        try {
+            session.update { cur -> ImportInto.apply(cur, p, target, keepSections).also { text = it.text }.payload }
+        } catch (e: IllegalArgumentException) { fail(e.message ?: "Not possible"); return@work }
+        val note = when {
+            importFromServer -> " The vault on the server was not changed; delete it yourself or leave it."
+            importIsMobile -> " The original file was not changed; keep or delete it yourself."
+            else -> ""
+        }
+        importBytes?.wipe(); importBytes = null; imported = null; importHeader = null
         replace(Screen.VaultList)
-        message = "Imported $added entries" + if (skipped > 0) ", skipped $skipped duplicates" else ""
+        message = text + "." + note
     }
 
     /** Desktop export (PVAULT1). [sectionId]: null = all entries, else only that section ("" = No section). */
