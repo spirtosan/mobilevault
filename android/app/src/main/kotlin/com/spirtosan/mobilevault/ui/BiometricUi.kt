@@ -4,12 +4,17 @@ import android.content.Context
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Password
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -23,10 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.spirtosan.mobilevault.security.BiometricPolicy
+import com.spirtosan.mobilevault.security.Reminders
 import javax.crypto.Cipher
 
 /** Null if a strong biometric (fingerprint) can be used; otherwise why not, in plain words. */
@@ -121,4 +128,62 @@ internal fun BiometricUnlockButton(vm: AppViewModel) {
     val activity = LocalContext.current as FragmentActivity
     ColorButton("Unlock with fingerprint", { offerBiometricUnlock(vm, activity) }, Palette.steel,
         Modifier.fillMaxWidth().testTag("bioUnlock"), Icons.Filled.Fingerprint, enabled = !vm.busy)
+}
+
+// ── password reminders ───────────────────────────────────────────────────────
+
+/** Every 30 days without typing the master password: type it once, nothing changes. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PracticePasswordCard(vm: AppViewModel) {
+    if (!Reminders.practiceDue(vm.reminderTimes, vm.reminderNow()) && !vm.practiceWrong) return
+    var pw by remember { mutableStateOf("") }
+    var hintShown by remember { mutableStateOf(false) }
+    PanelCard(Modifier.testTag("practiceCard"), title = "Practice your master password") {
+        Muted("You rarely type it. Type it once now so you don't forget it. Nothing is changed.")
+        PasswordField(pw, { pw = it }, "Master password", tag = "practicePw", imeAction = ImeAction.Done,
+            onDone = { if (pw.isNotEmpty()) { vm.practicePassword(pw.toCharArray()); pw = "" } }, isError = vm.practiceWrong)
+        if (vm.practiceWrong) {
+            ErrorText("That is not your master password.", "practiceWrong")
+            if (hintShown) vm.practiceHint?.let { WarnText("Hint: $it") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (vm.practiceHint != null && !hintShown) OutlineButton("Show hint", { hintShown = true }, Palette.amber)
+                ColorButton("Set a new password now", { vm.newPasswordFromPractice() }, Palette.blue,
+                    Modifier.testTag("practiceNewPw"), Icons.Filled.Password)
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MainButton("Check", { vm.practicePassword(pw.toCharArray()); pw = "" }, Modifier.testTag("practiceCheck"),
+                enabled = pw.isNotEmpty() && !vm.busy)
+            OutlineButton("Not now", { vm.dismissPractice() }, Palette.fgSecondary, Modifier.testTag("practiceDismiss"))
+        }
+    }
+}
+
+/** Once a year, only with a recovery key: is the printed Emergency Kit still where it should be? */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun KitCheckCard(vm: AppViewModel) {
+    if (!Reminders.kitDue(vm.reminderTimes, vm.hasRecoveryKey, vm.reminderNow()) || vm.kitPending) return
+    PanelCard(Modifier.testTag("kitCheckCard"), title = "Is your Emergency Kit still safe?") {
+        Muted("Check that the printed recovery key is still where you keep it, and that nobody else has seen it.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ColorButton("Yes", { vm.kitStillSafe() }, Palette.green, Modifier.testTag("kitSafe"))
+            ColorButton("Make a new key", { vm.kitMakeNew() }, Palette.blue, Modifier.testTag("kitNew"), Icons.Filled.Key)
+        }
+    }
+}
+
+/** Debug builds only: fast-forward the reminder clock (practice card, kit card, fingerprint N days, test restore). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun DebugClockCard(vm: AppViewModel) {
+    PanelCard(Modifier.testTag("debugClock"), title = "Debug: reminder clock") {
+        val days = vm.reminderTimes.debugOffsetMs / (24 * 3_600_000L)
+        Muted("Offset: +$days days (debug builds only)")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(1, 7, 30, 365).forEach { d -> SecondaryButton("+$d d", { vm.debugClockForward(d) }, Modifier.testTag("clock+$d")) }
+            SecondaryButton("Reset", { vm.debugClockForward(0) }, Modifier.testTag("clockReset"))
+        }
+    }
 }

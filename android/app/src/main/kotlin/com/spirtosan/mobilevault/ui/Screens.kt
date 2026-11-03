@@ -122,7 +122,7 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         Screen.EmergencyKit -> KitScreen(vm, snackbar)
         Screen.Unlock -> UnlockScreen(vm, snackbar)
         Screen.Recovery -> RecoveryScreen(vm, snackbar)
-        is Screen.NewPassword -> NewPasswordScreen(vm, snackbar, s.forced)
+        is Screen.NewPassword -> NewPasswordScreen(vm, snackbar, s.forced, s.withoutCurrent)
         Screen.VaultList -> ListScreen(vm, snackbar)
         is Screen.Detail -> DetailScreen(vm, snackbar, s.id)
         is Screen.Edit -> EditScreen(vm, snackbar, s.id)
@@ -356,7 +356,7 @@ private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
 }
 
 @Composable
-private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, forced: Boolean) {
+private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, forced: Boolean, withoutCurrent: Boolean = false) {
     var current by remember { mutableStateOf("") }
     var pw by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
@@ -364,12 +364,13 @@ private fun NewPasswordScreen(vm: AppViewModel, snackbar: SnackbarHostState, for
     Page(if (forced) "Set a new master password" else "Change master password", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
             if (forced) Text("You unlocked with the recovery key. Choose a new master password; the recovery key stays valid.", color = Palette.fgPrimary)
+            else if (withoutCurrent) Text("The vault is open, so you can set a new master password now, before the old one is lost.", color = Palette.fgPrimary)
             else PasswordField(current, { current = it }, "Current master password", tag = "currentPw")
             val ok = newPasswordFields(vm, pw, { pw = it }, confirm, { confirm = it }, hint, { hint = it })
             MainButton("Save", {
-                vm.setNewPassword(if (forced) null else current.toCharArray(), pw.toCharArray(), hint)
+                vm.setNewPassword(if (forced || withoutCurrent) null else current.toCharArray(), pw.toCharArray(), hint)
                 current = ""; pw = ""; confirm = ""
-            }, Modifier.fillMaxWidth().testTag("newPwSave"), Icons.Filled.Save, enabled = ok && (forced || current.isNotEmpty()))
+            }, Modifier.fillMaxWidth().testTag("newPwSave"), Icons.Filled.Save, enabled = ok && (forced || withoutCurrent || current.isNotEmpty()))
         }
     }
 }
@@ -405,6 +406,8 @@ private fun ListScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         ChoiceRow("", VaultEdits.Sort.entries, sort, { if (it == VaultEdits.Sort.AZ) "A–Z" else "Recently modified" }) { sort = it }
         BackupChip(vm)
         TestRestoreCard(vm)
+        PracticePasswordCard(vm)
+        KitCheckCard(vm)
         if (vm.kitPending) KitPendingCard(vm)
         if (entries.isEmpty()) Muted(if (query.isEmpty()) "No entries yet. Tap + to add one." else "Nothing found.")
         LazyColumn(Modifier.background(Palette.bgPanel, RoundedCornerShape(12.dp))) {
@@ -647,6 +650,7 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             ColorButton("Import from desktop (merge)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileDownload)
             ColorButton("Export for desktop", { vm.go(Screen.Export) }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileUpload)
         }
+        if (BuildConfig.DEBUG) DebugClockCard(vm)
         PanelCard(title = "About") {
             SecondaryButton("About Mobile Vault", { vm.go(Screen.About) }, Modifier.fillMaxWidth(), Icons.Filled.Info)
         }

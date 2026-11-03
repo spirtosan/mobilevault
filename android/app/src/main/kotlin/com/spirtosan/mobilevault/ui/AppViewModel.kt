@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.MobileVaultApp
 import com.spirtosan.mobilevault.backup.BackupException
 import com.spirtosan.mobilevault.backup.HttpBackupTarget
@@ -34,6 +35,7 @@ import com.spirtosan.mobilevault.security.BiometricPolicy
 import com.spirtosan.mobilevault.security.BiometricVault
 import com.spirtosan.mobilevault.security.KdfCalibration
 import com.spirtosan.mobilevault.security.PasswordGenerator
+import com.spirtosan.mobilevault.security.Reminders
 import com.spirtosan.mobilevault.security.UnlockThrottle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,8 +51,11 @@ sealed interface Screen {
     data object EmergencyKit : Screen
     data object Unlock : Screen
     data object Recovery : Screen
-    /** [forced] after a recovery-key unlock: the user must set a new master password. */
-    data class NewPassword(val forced: Boolean) : Screen
+    /**
+     * [forced] after a recovery-key unlock: the user must set a new master password.
+     * [withoutCurrent]: from the practice card after a wrong answer, while the vault is still open.
+     */
+    data class NewPassword(val forced: Boolean, val withoutCurrent: Boolean = false) : Screen
     data object VaultList : Screen
     data class Detail(val id: String) : Screen
     data class Edit(val id: String?) : Screen
@@ -230,6 +235,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!ok) return false
         work {
             prefs.setKitPending(false)
+            prefs.setKitChecked(reminderNow())
             kitPending = false
             k.key.wipe()
             kit = null
@@ -332,6 +338,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Retry a pending upload, and fix a revision clash with the server while the vault is open. */
     private fun afterUnlock() {
+        viewModelScope.launch { prefs.startRemindersIfNeeded(reminderNow()) }
         a.queueBackup()
         a.scope.launch { runCatching { a.resolveNewRevision() } }
         viewModelScope.launch { refreshBiometric() }
@@ -657,8 +664,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Create flow, step 3 → "Skip": the red "No backup set up" chip stays on the list. */
     fun skipBackupStep() = replace(Screen.VaultList)
 
-    /** Wall clock for reminders (debug builds can fast-forward it, see Part E). */
-    fun reminderNow(): Long = System.currentTimeMillis()
+    /** Wall clock for reminders and the fingerprint N-day rule; debug builds can fast-forward it. */
+    fun reminderNow(): Long = System.currentTimeMillis() + if (BuildConfig.DEBUG) reminderTimes.debugOffsetMs else 0L
 
     fun dismissTestRestoreReminder() = viewModelScope.launch { prefs.setTestRestoreDismissed(System.currentTimeMillis()) }
 
@@ -752,6 +759,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val biometricDays get() = prefs.biometricDays
     fun setBiometricDays(days: Int) = viewModelScope.launch { prefs.setBiometricDays(days) }
 
+    // ── password reminders ────────────────────────────────────────────────────
+    /** Reminder clocks; kept current from DataStore (collected in init). */
+    var reminderTimes by mutableStateOf(Reminders.Times()); private set
+    /** Practice card: the last answer was wrong (offer the hint and a new password). */
+    var practiceWrong by mutableStateOf(false); private set
+    /** Hint of the open vault, for the practice card. */
+    var practiceHint by mutableStateOf<String?>(null); private set
+
+    fun practicePassword(password: CharArray) = work {
+        try {
+            val ok = withContext(Dispatchers.Default) { session.withVault(false) { it.verifyPassword(password) } }
+            if (ok) {
+                practiceWrong = false
+                passwordTyped()
+                message = "Correct. Your master password is still in your head."
+            } else {
+                practiceWrong = true
+                practiceHint = session.read { it.header.hint }
+            }
+        } finally { password.wipe() }
+    }
+
+    fun dismissPractice() = viewModelScope.launch { practiceWrong = false; prefs.setPracticeDismissed(reminderNow()) }
+
+    /** Practice failed: set a new master password while the vault is open (no current password needed). */
+    fun newPasswordFromPractice() { practiceWrong = false; go(Screen.NewPassword(forced = false, withoutCurrent = true)) }
+
+    fun kitStillSafe() = viewModelScope.launch { prefs.setKitChecked(reminderNow()); message = "Thanks. Next reminder in a year." }
+
+    fun kitMakeNew() { viewModelScope.launch { prefs.setKitChecked(reminderNow()) }; regenerateRecoveryKey() }
+
+    /** Debug builds: move the reminder clock forward by [days] (0 = reset). */
+    fun debugClockForward(days: Int) = viewModelScope.launch {
+        prefs.setDebugClockOffset(if (days == 0) 0L else reminderTimes.debugOffsetMs + days * 24 * 3_600_000L)
+        refreshBiometric()
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
     private fun work(block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -767,6 +811,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         screen = if (session.isUnlocked) Screen.VaultList else if (repo.exists()) Screen.Unlock else Screen.Onboarding
         viewModelScope.launch { session.lockEvents.collect { onLocked(it) } }
+        viewModelScope.launch {
+            prefs.reminderTimes.collect {
+                val clockMoved = it.debugOffsetMs != reminderTimes.debugOffsetMs
+                reminderTimes = it
+                if (clockMoved) refreshBiometric()
+            }
+        }
         if (screen == Screen.Unlock) prepareUnlock()
     }
 }

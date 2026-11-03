@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.spirtosan.mobilevault.security.BiometricPolicy
+import com.spirtosan.mobilevault.security.Reminders
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -46,6 +47,10 @@ class AppSettings(private val context: Context) {
         val pwTypedBoot = intPreferencesKey("password_typed_boot")
         val bioFailures = intPreferencesKey("bio_failures")
         val bioInvalidated = booleanPreferencesKey("bio_invalidated")
+        val reminderStart = longPreferencesKey("reminder_start")
+        val practiceDismissed = longPreferencesKey("practice_dismissed_at")
+        val kitChecked = longPreferencesKey("kit_checked_at")
+        val debugClock = longPreferencesKey("debug_clock_offset_ms")
     }
 
     val settings: Flow<Settings> = context.store.data.map { p ->
@@ -123,4 +128,23 @@ class AppSettings(private val context: Context) {
     suspend fun addBiometricFailure() { context.store.edit { it[K.bioFailures] = (it[K.bioFailures] ?: 0) + 1 } }
 
     suspend fun setBiometricInvalidated(v: Boolean) { context.store.edit { if (v) it[K.bioInvalidated] = true else it.remove(K.bioInvalidated) } }
+
+    // ── password reminders (Reminders) ──────────────────────────────────────────
+    val reminderTimes: Flow<Reminders.Times> = context.store.data.map {
+        Reminders.Times(
+            start = it[K.reminderStart] ?: 0L, passwordTypedAt = it[K.pwTypedAt] ?: 0L,
+            practiceDismissedAt = it[K.practiceDismissed] ?: 0L, kitCheckedAt = it[K.kitChecked] ?: 0L,
+            debugOffsetMs = it[K.debugClock] ?: 0L,
+        )
+    }
+
+    /** First unlock with this version: the reminder clocks start now (no card right after an update). */
+    suspend fun startRemindersIfNeeded(nowMs: Long) { context.store.edit { if (it[K.reminderStart] == null) it[K.reminderStart] = nowMs } }
+
+    suspend fun setPracticeDismissed(ms: Long) { context.store.edit { it[K.practiceDismissed] = ms } }
+
+    suspend fun setKitChecked(ms: Long) { context.store.edit { it[K.kitChecked] = ms } }
+
+    /** Debug builds only (the UI is hidden in release, and the offset is ignored there). */
+    suspend fun setDebugClockOffset(ms: Long) { context.store.edit { if (ms == 0L) it.remove(K.debugClock) else it[K.debugClock] = ms } }
 }
