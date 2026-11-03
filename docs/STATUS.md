@@ -46,14 +46,14 @@
 Huawei (Android 10) and Motorola (Android 12) not tested with the Task 06 build yet.
 
 ## Task 07: owner checks still open (2026-11-03)
-- [ ] Pair by **scanning the QR code** with the camera (only the paste path was tested over adb).
+- [x] ~~Pair by **scanning the QR code** with the camera~~ → done 2026-11-03 (debug app as `xiaomi-qr`, Test connection OK, then disconnected + revoked)
 - [ ] Fingerprint: turn on (password + finger), lock, unlock with the finger; turn off.
 - [ ] Fingerprint: reboot → password required; enrol a new fingerprint → "Fingerprints changed", then turn on again; 5 wrong fingers → password.
 - [ ] HyperOS: Autostart on + Battery saver "No restrictions" for Mobile Vault; then check the chip stays green after a day without opening the app.
-- Server devices now: `xiaomi` (release app) active; `xiaomi-debug`, `xiaomi-debug-2`, `xiaomi-debug-3`, `smoketest`, `smoketest2` revoked. Test vault `dccf07c8-…` (debug, 4 revs) stays on the server until retention.
+- Server devices now: `xiaomi` (release app) active; `xiaomi-debug`, `xiaomi-debug-2`, `xiaomi-debug-3`, `xiaomi-debug-4`, `xiaomi-qr`, `smoketest`, `smoketest2` revoked. Test vault `dccf07c8-…` (debug, 4 revs) stays on the server until retention.
 
 ## Task 08: open
-- [ ] Live tests that need the test vault's password (it wasn't in the task prompt): debug app restore from the vault list; release app new recovery key → upload → test restore → version history of an older rev asks for the password; chip green + test restore OK on the new release build. The list screen itself was checked live (both server vaults shown, revisions and unlock screen reached).
+- [x] ~~Live tests~~ → done 2026-11-03: debug app restore from the vault list (fresh pairing, revoked after); release app new recovery key (password asked first) → r11 uploaded → fingerprint unlock turned off → test restore "r11 decrypts: 5 entries, same as on this phone" → version history r10 asks for "the master password this version was saved with" and opens; chip green.
 - [ ] Owner: after any key change, turn fingerprint unlock on again (Settings → Security). The new fingerprint key also requires an unlocked phone (L2).
 
 ## Next
