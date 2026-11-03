@@ -112,9 +112,9 @@ class VaultFlowTest {
     /** Create flow, step 3 (backup server): "Skip" + confirm. The test app is never paired (see [resetVault]). */
     private fun skipBackupStep() {
         waitFor("backupStepSkip")
-        tag("backupStepSkip").performClick()
+        tag("backupStepSkip").clickAction()
         waitFor("backupSkipConfirm")
-        tag("backupSkipConfirm").performClick()
+        tag("backupSkipConfirm").clickAction()
         waitFor("add")
     }
 

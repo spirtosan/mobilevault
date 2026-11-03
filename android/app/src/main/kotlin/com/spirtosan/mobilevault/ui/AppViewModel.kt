@@ -493,6 +493,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val c = a.backup.pair(p)
             connectionText = null
             message = "Connected to ${c.host} as \"${c.device}\""
+            a.queueBackup()                  // first upload right away (no-op without a local vault)
             afterPairing(purpose)
         } catch (e: BackupException) {
             pairingError = e.text
@@ -503,7 +504,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         when (purpose) {
             PairPurpose.SETTINGS -> back()
             PairPurpose.RESTORE -> { back(); go(Screen.RestoreStart) }
-            PairPurpose.CREATE -> { replace(Screen.VaultList); a.queueBackup() }
+            PairPurpose.CREATE -> replace(Screen.VaultList)
         }
     }
 
