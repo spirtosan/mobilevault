@@ -52,6 +52,14 @@ OkHttp with the Keystore-backed client certificate, certificate pinning, and TLS
 
 The `BackupTarget` interface stays pluggable, so another server or a USB/SD copy (SAF) can be added later. Recommended minimum: the server, plus the paper recovery key, plus an occasional manual export.
 
+### Pair a new phone (Task 09)
+1. On the owner's PC, double-click **`tools/windows/Pair phone.cmd`** (first time: create `%USERPROFILE%\mobilevault-secrets\pair-phone.json` from `tools/windows/pair-phone.example.json`; it holds only the SSH login, no password).
+2. Type a name for the phone (Enter = `phone-YYYYMMDD`). The script runs `mvault-admin pair <name>` over SSH and shows the QR code full screen with a 10-minute countdown and the paste text. The QR is made on the server by `qrencode` and streamed back as text; nothing is stored on the server or on the PC.
+3. On the phone: Settings → Backup → Connect → **Scan QR code**, then **Test connection**.
+4. Replacing a phone, or one was lost: `mvault-admin revoke <old-name>` on the server.
+
+Fallback: SSH to the server, `mvault-admin pair <name>`, paste the `Payload:` line into the app ("Or paste the pairing text").
+
 ## Upload logic
 - Each save produces a new `rev`. A `WorkManager` job (network-connected constraint, exponential backoff) uploads `vault-<vault_id>-r<rev>-<utc>.pvault` and then overwrites `vault-<vault_id>-latest.pvault`.
 - Integrity: after upload, compare SHA-256 with the server value (ETag, Content-MD5, or a re-download) before marking the upload successful.

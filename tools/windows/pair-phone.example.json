@@ -1,0 +1,6 @@
+{
+  "ssh": "<ADMIN_USER>@<SERVER_HOST>",
+  "port": 22,
+  "identity": "",
+  "sudo": false
+}

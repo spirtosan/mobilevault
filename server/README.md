@@ -23,6 +23,14 @@ It uses only the Python 3.10+ standard library plus the `openssl` CLI. No pip pa
 
 There is no `DELETE` (405). Full description: `docs/BACKUP_AND_RECOVERY.md`. Installation: `docs/CLAUDE_CODE_TASK_03.md`.
 
+## Pair a new phone
+1. On the owner's PC, double-click **`tools/windows/Pair phone.cmd`** (first time: create `%USERPROFILE%\mobilevault-secrets\pair-phone.json` from `tools/windows/pair-phone.example.json`; it holds only the SSH login, no password).
+2. Type a name for the phone (Enter = `phone-YYYYMMDD`). The script runs `mvault-admin pair <name>` over SSH and shows the QR code full screen with a 10-minute countdown and the paste text. The QR is made on the server by `qrencode` and streamed back as text; nothing is stored on the server or on the PC.
+3. On the phone: Settings → Backup → Connect → **Scan QR code**, then **Test connection**.
+4. Replacing a phone, or one was lost: `mvault-admin revoke <old-name>` on the server.
+
+Fallback: SSH to the server, `mvault-admin pair <name>`, paste the `Payload:` line into the app ("Or paste the pairing text").
+
 ## Layout
 | Path | |
 |---|---|
