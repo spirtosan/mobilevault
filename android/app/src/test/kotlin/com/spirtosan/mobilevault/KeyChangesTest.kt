@@ -109,6 +109,24 @@ class KeyChangesTest {
         Pvault2.unlockWithPassword(raw, "pw".toCharArray())
     }
 
+    /** Settings → "Check my recovery key" (Task 09). */
+    @Test fun checkRecoveryKey() {
+        val c = vault()
+        val raw = c.bytes
+        val shown = c.recoveryKey!!.display()
+        assertEquals(KeyChanges.KeyCheck.OPENS, KeyChanges.checkRecoveryKey(raw, shown))
+        assertEquals(KeyChanges.KeyCheck.OPENS, KeyChanges.checkRecoveryKey(raw, shown.lowercase().replace("-", " ")))
+        assertEquals(KeyChanges.KeyCheck.WRONG, KeyChanges.checkRecoveryKey(raw, RecoveryKey.generate().display()))
+        throws<IllegalArgumentException> { KeyChanges.checkRecoveryKey(raw, "ABCD") }
+        assertEquals(KeyChanges.KeyCheck.NO_RECOVERY_SLOT, KeyChanges.checkRecoveryKey(vault(withKey = false).bytes, shown))
+        // after a new key the old one no longer opens the new file
+        val v = c.vault
+        val newKey = KeyChanges.newRecoveryKey(v, "pw".toCharArray(), fast).display()
+        val raw2 = v.seal("t")
+        assertEquals(KeyChanges.KeyCheck.WRONG, KeyChanges.checkRecoveryKey(raw2, shown))
+        assertEquals(KeyChanges.KeyCheck.OPENS, KeyChanges.checkRecoveryKey(raw2, newKey))
+    }
+
     /** Right after a rotation the server's newest file still has the old DEK: "still uploading", not a failure. */
     @Test fun testRestoreRightAfterRotationSaysStillUploading() = runBlocking {
         val target = FakeTarget()

@@ -51,6 +51,8 @@ sealed interface Screen {
     data object Onboarding : Screen
     data class Create(val imported: VaultPayload?) : Screen
     data object EmergencyKit : Screen
+    /** Settings → Security → "Check my recovery key". */
+    data object CheckRecoveryKey : Screen
     data object Unlock : Screen
     data object Recovery : Screen
     /**
@@ -83,7 +85,7 @@ enum class PairPurpose { SETTINGS, RESTORE, CREATE }
  * The recovery key on screen. The vault holding it is already saved and open, so a lock on the
  * Emergency Kit screen never leaves a printed key without its vault. [newVault]: create flow.
  */
-class KitState(val key: RecoveryKey, val vaultId: String, val newVault: Boolean, val challenge: List<Int>, val doneText: String = "Vault created") {
+class KitState(val key: RecoveryKey, val vaultId: String, val newVault: Boolean, val doneText: String = "Vault created") {
     val display: String = key.display()
     val groups: List<String> get() = display.split("-")
 }
@@ -230,29 +232,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun showKit(key: RecoveryKey, vaultId: String, newVault: Boolean, doneText: String = "Vault created") {
         kitPending = true
-        kit = KitState(key, vaultId, newVault, challenge(), doneText)
+        kit = KitState(key, vaultId, newVault, doneText)
         replace(Screen.EmergencyKit)
     }
 
-    private fun challenge() = (0 until 9).shuffled().take(3).sorted()
+    /** "I wrote it down" (Task 09: no typing test): the kit is done, wipe the key and go on. */
+    fun kitWrittenDown() = work { finishKit(saved = false) }
 
-    /** The user re-typed the 3 groups: the key is written down, wipe it. */
-    fun confirmKit(typed: List<String>): Boolean {
-        val k = kit ?: return false
-        val ok = k.challenge.indices.all { i -> typed[i].trim().equals(k.groups[k.challenge[i]], ignoreCase = true) }
-        if (!ok) return false
-        work {
-            prefs.setKitPending(false)
-            prefs.setKitChecked(reminderNow())
-            kitPending = false
-            k.key.wipe()
-            kit = null
-            replace(if (k.newVault) afterCreate() else Screen.VaultList)
-            message = k.doneText
-        }
-        return true
+    private suspend fun finishKit(saved: Boolean) {
+        val k = kit ?: return
+        prefs.setKitPending(false)
+        prefs.setKitChecked(reminderNow())
+        kitPending = false
+        k.key.wipe()
+        kit = null
+        replace(if (k.newVault) afterCreate() else Screen.VaultList)
+        message = if (saved) "Emergency Kit saved. ${k.doneText}" else k.doneText
     }
 
+    /** A successful PDF save also completes the kit. If writing fails, the user stays on the screen. */
     fun writeKitPdf(uri: Uri) = work {
         val k = kit ?: return@work
         withContext(Dispatchers.IO) {
@@ -260,7 +258,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 EmergencyKitPdf.write(it, k.display, k.vaultId, LocalDate.now().toString())
             }
         }
-        message = "Emergency Kit saved"
+        finishKit(saved = true)
+    }
+
+    // ── check my recovery key (Task 09) ─────────────────────────────────────────
+    /** Result of the last check: true = opens, false = doesn't (with [keyCheckText]). */
+    var keyCheckOk by mutableStateOf<Boolean?>(null); private set
+    var keyCheckText by mutableStateOf<String?>(null); private set
+
+    fun resetKeyCheck() { keyCheckOk = null; keyCheckText = null }
+
+    /** Try-unlock of the current file in memory; never changes anything. Wrong keys count like wrong passwords. */
+    fun checkRecoveryKey(text: String) = work {
+        resetKeyCheck()
+        val (n, at) = prefs.failures()
+        val wait = UnlockThrottle.remainingMs(n, at, System.currentTimeMillis())
+        if (wait > 0) { keyCheckOk = false; keyCheckText = "Too many wrong attempts. Try again in ${(wait + 999) / 1000} s."; return@work }
+        val r = try {
+            withContext(Dispatchers.Default) { KeyChanges.checkRecoveryKey(withContext(Dispatchers.IO) { repo.read() }, text) }
+        } catch (e: IllegalArgumentException) {
+            keyCheckOk = false; keyCheckText = e.message ?: "That is not a valid recovery key"; return@work
+        }
+        when (r) {
+            KeyChanges.KeyCheck.OPENS -> { prefs.clearFailures(); keyCheckOk = true; keyCheckText = "✓ This key opens your vault." }
+            KeyChanges.KeyCheck.WRONG -> {
+                prefs.recordFailure(System.currentTimeMillis())
+                keyCheckOk = false; keyCheckText = "✗ This key doesn't open this vault."
+            }
+            KeyChanges.KeyCheck.NO_RECOVERY_SLOT -> { keyCheckOk = false; keyCheckText = "This vault has no recovery key." }
+        }
     }
 
     // ── unlock ────────────────────────────────────────────────────────────────

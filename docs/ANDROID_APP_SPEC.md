@@ -44,6 +44,8 @@ Forgetting the master password is the most likely way to lose everything, especi
 2. **Periodic confirmation**: after biometric unlock, ask for the master password instead if it hasn't been typed for N days (default 7, choices 3/7/14/30). Plus a dismissible "Practice your master password" card every 30 days: the password is checked by re-deriving the key, and nothing changes.
    Wrong answer: the card offers to show the hint, or to start recovery with the recovery key while biometrics still work, so the user can set a new password **before** it's actually lost.
 3. **Recovery key / Emergency Kit**: the last resort when the password is fully forgotten (see VAULT_FORMAT_V2.md). The app reminds the user yearly to check the kit is still stored safely.
+   - Kit screen (Task 09): the key, the Vault ID, "Save Emergency Kit as PDF" (a successful save completes the step) and "I wrote it down". No typing test. Leaving without either keeps the "Recovery key not confirmed" card.
+   - Settings → Security → "Check my recovery key": try-unlock in memory with the typed key, ✓ / ✗, changes nothing, throttled like unlock.
 
 ## Mobile-specific hardening
 - `FLAG_SECURE` on all windows: no screenshots, hidden in the recent-apps preview.
@@ -63,7 +65,7 @@ Forgetting the master password is the most likely way to lose everything, especi
 3. Unlock: password field, biometric button; "Forgot password? Use recovery key" only when the vault has a recovery slot
 4. Vault list: search bar, entries, FAB "+", backup status chip
 5. Entry detail / edit (same fields as desktop + notes), generator button
-6. Settings: security (auto-lock, clipboard, biometrics, change password), recovery key (create / new / remove; without one a permanent "No recovery key" warning), backups (targets, history, restore, test restore), import/export, about
+6. Settings: security (auto-lock, clipboard, biometrics, check my recovery key, change password), recovery key (create / new / remove; without one a permanent "No recovery key" warning), backups (targets, history, restore, test restore), import/export, about
 
 ## Suggested module layout
 ```

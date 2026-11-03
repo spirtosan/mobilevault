@@ -20,7 +20,11 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import android.net.Uri
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
+import com.spirtosan.mobilevault.crypto.RecoveryKey
+import com.spirtosan.mobilevault.ui.AppViewModel
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -118,16 +122,10 @@ class VaultFlowTest {
         waitFor("add")
     }
 
+    /** Task 09: "I wrote it down", one tap, no typing test. */
     private fun confirmKit(key: String, newVault: Boolean = true) {
-        val groups = key.split("\n", "-").map { it.trim() }
-        assertEquals(9, groups.size)
-        var typed = 0
-        for (g in 0 until 9) {
-            val n = rule.onAllNodes(hasTestTag("group:$g"), useUnmergedTree = true).fetchSemanticsNodes()
-            if (n.isNotEmpty()) { tag("group:$g").performScrollTo().performTextInput(groups[g].lowercase()); typed++ }
-        }
-        assertEquals(3, typed)
-        tag("kitDone").performScrollTo().performClick()
+        assertEquals(9, key.split("\n", "-").map { it.trim() }.size)
+        tag("kitDone").performScrollTo().clickAction()
         if (newVault) skipBackupStep() else waitFor("add")
     }
 
@@ -240,6 +238,64 @@ class VaultFlowTest {
             tag("recoveryInput").performTextInput(key.replace("\n", " "))
             tag("recoveryUnlock").clickAction()
             waitFor("newPwSave")
+        }
+    }
+
+    // ── Emergency Kit without the typing test (Task 09) ──────────────────────
+    /** "I wrote it down": no pending card afterwards, also not after lock + unlock. */
+    @Test
+    fun kitWrittenDownLeavesNoPendingCard() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            confirmKit(createUntilKit())
+            gone("kitPending")
+            assertEquals(false, runBlocking { app.appSettings.kitPending() })
+            tag("lock").performClick()
+            unlock()
+            gone("kitPending")
+        }
+    }
+
+    /** A successful PDF save completes the step on its own (the SAF picker is replaced by a file Uri here). */
+    @Test
+    fun kitPdfSaveCompletesTheStep() {
+        resetVault()
+        val pdf = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir.resolve("kit-test.pdf").also { it.delete() }
+        ActivityScenario.launch(MainActivity::class.java).use { sc ->
+            createUntilKit()
+            sc.onActivity { ViewModelProvider(it)[AppViewModel::class.java].writeKitPdf(Uri.fromFile(pdf)) }
+            skipBackupStep()
+            gone("kitPending")
+            assertTrue(pdf.length() > 1000)
+            assertEquals("%PDF", pdf.readBytes().copyOfRange(0, 4).toString(Charsets.US_ASCII))
+        }
+        pdf.delete()
+    }
+
+    /** Settings → Security → "Check my recovery key": right key ✓, wrong key ✗, nothing changes. */
+    @Test
+    fun checkMyRecoveryKey() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val key = createUntilKit()
+            confirmKit(key)
+            val before = InstrumentationRegistry.getInstrumentation().targetContext.filesDir.resolve("vault.pvault").readBytes()
+            openSettings()
+            tag("checkKey").performScrollTo().clickAction()
+            waitFor("checkKeyInput")
+            tag("checkKeyInput").performTextInput(key.replace("\n", "-").lowercase())
+            tag("checkKeyRun").clickAction()
+            waitFor("checkKeyResult")
+            tag("checkKeyResult").assertTextContains("opens your vault", substring = true)
+
+            tag("checkKeyInput").performTextClearance()
+            tag("checkKeyInput").performTextInput(RecoveryKey.generate().display())    // well-formed, but another key
+            tag("checkKeyRun").clickAction()
+            waitFor("checkKeyResult")
+            tag("checkKeyResult").assertTextContains("doesn't open this vault", substring = true)
+            val after = InstrumentationRegistry.getInstrumentation().targetContext.filesDir.resolve("vault.pvault").readBytes()
+            assertTrue(before.contentEquals(after))
+            runBlocking { app.appSettings.clearFailures() }
         }
     }
 

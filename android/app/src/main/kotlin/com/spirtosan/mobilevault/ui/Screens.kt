@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -121,6 +122,7 @@ fun AppRoot(vm: AppViewModel, finish: () -> Unit) {
         Screen.Onboarding -> OnboardingScreen(vm, snackbar)
         is Screen.Create -> CreateScreen(vm, snackbar, s)
         Screen.EmergencyKit -> KitScreen(vm, snackbar)
+        Screen.CheckRecoveryKey -> CheckRecoveryKeyScreen(vm, snackbar)
         Screen.Unlock -> UnlockScreen(vm, snackbar)
         Screen.Recovery -> RecoveryScreen(vm, snackbar)
         is Screen.NewPassword -> NewPasswordScreen(vm, snackbar, s.forced, s.withoutCurrent)
@@ -273,7 +275,6 @@ private fun KitScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         vm.externalDone()
         if (uri != null) vm.writeKitPdf(uri)
     }
-    var typed by remember(k) { mutableStateOf(List(3) { "" }) }
     Page("Emergency Kit", snackbar, busy = vm.busy) {
         PanelCard(title = "Your recovery key") {
             Text("It opens the vault if you forget the master password.", color = Palette.fgPrimary)
@@ -287,16 +288,10 @@ private fun KitScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             Muted("Vault ID: ${k.vaultId}")
             WarnText("Write it on paper or save the PDF and print it. Keep it offline. It is shown only now.")
             ColorButton("Save Emergency Kit as PDF", { vm.externalStarted(); savePdf.launch("MobileVault-EmergencyKit.pdf") },
-                Palette.steel, Modifier.fillMaxWidth(), Icons.Filled.PictureAsPdf)
-        }
-        PanelCard(title = "Check that you have it") {
-            Text("Type these groups:", color = Palette.fgPrimary)
-            k.challenge.forEachIndexed { i, g ->
-                // No uppercase() while typing (some keyboards repeat text when the value is rewritten); the check ignores case.
-                KeyField(typed[i], { v -> typed = typed.toMutableList().also { it[i] = v } }, "Group ${g + 1}", tag = "group:$g")
-            }
-            MainButton("Continue", { if (!vm.confirmKit(typed)) vm.fail("The groups don't match. Check what you wrote down.") },
-                Modifier.fillMaxWidth().testTag("kitDone"), enabled = typed.all { it.length == 4 } && !vm.busy)
+                Palette.steel, Modifier.fillMaxWidth().testTag("kitPdf"), Icons.Filled.PictureAsPdf, enabled = !vm.busy)
+            MainButton("I wrote it down", { vm.kitWrittenDown() }, Modifier.fillMaxWidth().testTag("kitDone"), Icons.Filled.Check,
+                enabled = !vm.busy)
+            Muted("Saving the PDF also completes this step. You can check the key later in Settings → Security.")
         }
     }
 }
@@ -352,6 +347,27 @@ private fun RecoveryScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             if (vm.busy) CircularProgressIndicator(Modifier.size(28.dp).align(Alignment.CenterHorizontally), color = Palette.orange)
             else MainButton("Unlock", submit, Modifier.fillMaxWidth().testTag("recoveryUnlock"), Icons.Filled.LockOpen, enabled = key.isNotBlank())
             Muted("After unlocking you will set a new master password.")
+        }
+    }
+}
+
+/** Settings → Security → "Check my recovery key": only checks, changes nothing, no master password needed. */
+@Composable
+private fun CheckRecoveryKeyScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
+    var key by remember { mutableStateOf("") }
+    val submit = { if (key.isNotBlank() && !vm.busy) vm.checkRecoveryKey(key) }
+    Page("Check my recovery key", snackbar, onBack = { key = ""; vm.resetKeyCheck(); vm.back() }, busy = vm.busy) {
+        PanelCard {
+            Text("Type or paste the key from your Emergency Kit to make sure it still opens this vault. Nothing is changed.",
+                color = Palette.fgPrimary)
+            KeyField(key, { key = it; vm.resetKeyCheck() }, "Recovery key", tag = "checkKeyInput", imeAction = ImeAction.Go, onDone = submit)
+            Muted("${key.count { it.isLetterOrDigit() }} of 36 characters")
+            MainButton("Check", submit, Modifier.fillMaxWidth().testTag("checkKeyRun"), Icons.Filled.Key, enabled = key.isNotBlank() && !vm.busy)
+            when (vm.keyCheckOk) {
+                true -> Text(vm.keyCheckText ?: "", color = Palette.green, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("checkKeyResult"))
+                false -> ErrorText(vm.keyCheckText ?: "", "checkKeyResult")
+                null -> {}
+            }
         }
     }
 }
@@ -452,7 +468,7 @@ private fun KitPendingCard(vm: AppViewModel) {
     var confirm by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf(false) }
     PanelCard(Modifier.testTag("kitPending"), title = "Recovery key not confirmed") {
-        Muted("The app locked before you confirmed the Emergency Kit. If you didn't write down or save that key, create a new one, or remove it.")
+        Muted("You didn't save or write down your recovery key. Make a new one, or remove it.")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ColorButton("New recovery key", { confirm = true }, Palette.blue, icon = Icons.Filled.Key)
             OutlineButton("Remove recovery key", { remove = true }, Palette.red, Modifier.testTag("kitPendingRemove"), Icons.Filled.Delete)
@@ -647,6 +663,8 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             ChoiceRow("Clear copied passwords after", Settings.CLIPBOARD_CHOICES, s.clipboardClearSeconds,
                 { if (it == 0) "Never" else "$it s" }) { vm.updateSettings(s.copy(clipboardClearSeconds = it)) }
             BiometricSettings(vm)
+            if (vm.hasRecoveryKey) ColorButton("Check my recovery key", { vm.resetKeyCheck(); vm.go(Screen.CheckRecoveryKey) }, Palette.steel,
+                Modifier.fillMaxWidth().testTag("checkKey"), Icons.Filled.Key)
             ColorButton("Change master password", { vm.go(Screen.NewPassword(forced = false)) }, Palette.blue,
                 Modifier.fillMaxWidth(), Icons.Filled.Password)
         }

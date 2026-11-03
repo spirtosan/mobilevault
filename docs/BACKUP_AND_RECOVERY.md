@@ -75,8 +75,9 @@ The `BackupTarget` interface stays pluggable, so another server or a USB/SD copy
 - Phase 2: automatic merge per entry `id`: newer `modified` wins, and tombstones are respected. Conflicting edits keep both versions.
 
 ## Emergency Kit (PDF generated on device, shown at vault creation)
-Contains the vault ID, the recovery key (9 groups of 4 characters, see VAULT_FORMAT_V2.md) and short restore instructions. The user is asked to print it or store it offline, and must re-type 3 random groups before continuing.
+Contains the vault ID, the recovery key (9 groups of 4 characters, see VAULT_FORMAT_V2.md) and short restore instructions. The user is asked to print it or store it offline. The step is done with **"Save Emergency Kit as PDF"** (a successful save continues automatically) or **"I wrote it down"** (one tap). The earlier "re-type 3 groups" test was dropped (owner, Task 09): too much work, people would skip it.
 
 - The recovery key is **optional** (2026-11-02). Create flow: after the password, "Create recovery key (recommended)" or "Skip" with a confirmation. Server backups do not replace it: they are encrypted with the same password.
-- The vault (or the new recovery slot) is saved **before** the key is shown, so a kit that was saved or printed always matches the file even if the app locks on the kit screen. An unconfirmed kit shows a reminder in the vault list (create a new key, or remove it).
+- The vault (or the new recovery slot) is saved **before** the key is shown, so a kit that was saved or printed always matches the file even if the app locks on the kit screen. Leaving the kit screen without either (lock, back, app killed) shows the "Recovery key not confirmed" card in the vault list ("You didn't save or write down your recovery key. Make a new one, or remove it.").
+- Settings → Security → **"Check my recovery key"**: type or paste the key → "✓ This key opens your vault" / "✗ This key doesn't open this vault". Only a try-unlock in memory; nothing changes, no master password needed; wrong keys are throttled like wrong passwords.
 - Settings → Recovery key: create one (if none), replace it, or remove it (master password + confirmation).

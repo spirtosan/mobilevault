@@ -1,6 +1,9 @@
 package com.spirtosan.mobilevault.security
 
 import com.spirtosan.mobilevault.crypto.Argon2Params
+import com.spirtosan.mobilevault.crypto.Pvault2
+import com.spirtosan.mobilevault.crypto.VaultFormatException
+import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.RecoveryKey
 import com.spirtosan.mobilevault.crypto.UnlockedVault
 
@@ -27,6 +30,25 @@ object KeyChanges {
     const val REMOVE_CONFIRM = "Without a recovery key, a forgotten master password means all passwords in this vault are lost.\n\n" +
         "The vault key is changed too, so your printed Emergency Kit won't open newer versions. Older backups on the server " +
         "and local snapshots still open with it."
+
+    enum class KeyCheck { OPENS, WRONG, NO_RECOVERY_SLOT }
+
+    /**
+     * Settings → "Check my recovery key" (Task 09): does [keyText] open the vault file [raw]? Only a
+     * try-unlock in memory, the result is wiped; nothing changes. Throws IllegalArgumentException
+     * (with a message for the owner) if the text isn't a well-formed recovery key.
+     */
+    fun checkRecoveryKey(raw: ByteArray, keyText: String): KeyCheck {
+        val key = RecoveryKey.parse(keyText)
+        return try {
+            Pvault2.unlockWithRecoveryKey(raw, key).wipe()
+            KeyCheck.OPENS
+        } catch (e: WrongKeyException) {
+            KeyCheck.WRONG
+        } catch (e: VaultFormatException) {
+            if (!Pvault2.peekHeader(raw).hasRecoveryKey) KeyCheck.NO_RECOVERY_SLOT else throw e
+        } finally { key.wipe() }
+    }
 
     /** "New recovery key" / "Create recovery key": check [password], rotate, return the new key (show it once). */
     fun newRecoveryKey(v: UnlockedVault, password: CharArray, kdf: Argon2Params): RecoveryKey {
