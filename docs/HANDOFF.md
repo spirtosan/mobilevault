@@ -54,8 +54,11 @@ Kit step: "Save Emergency Kit as PDF" or "I wrote it down" (no typing test); Set
 ### Done: Task 10 (2026-11-03): sections in one vault + import into a section
 One vault with optional sections (`sec` + `settings.sections`, PVAULT2 v2 unchanged otherwise); chips on the list only when sections exist; Settings → Sections; Settings → Import a file (desktop or Mobile Vault) or from the backup server into a chosen section. Screenshots in `docs/screenshots/task10/`.
 
+### Done with the owner (2026-11-03): release app switched to the real vault
+The release app now holds the owner's real vault (sections Personal / Work, new master password, rotated key, new Emergency Kit). **It is off-limits for tests from now on**: only install newer release builds over it. Details and a found import-preview bug: STATUS.md.
+
 ### Next
-Owner: import the two old vaults into Personal / Work. Owner check: HyperOS battery settings. Next task: 11.
+Task 11 (not started). Owner check: HyperOS battery settings.
 
 ### Later
 Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
@@ -74,7 +77,7 @@ Server (future task): stale TURN `external-ip`; restic + off-site backup of the 
 - The cloud sandbox refuses `rm -rf` with globs after `cd`; use fresh `mktemp -d` dirs. Transfer files to the PC as a `.tgz` via `device_commit_files`, then extract (`*.tgz` is git-ignored; the linked shell can't delete files).
 - Don't let the nginx catch-all serve app folders: delete folders **before** removing their deny rules.
 - Xiaomi/HyperOS: adb taps need "USB debugging (Security settings)" **and** USB debugging toggled off/on afterwards. HyperOS may block *new* USB installs ("Block installation") while updates still work.
-- The installed test app is a release build signed with the PC's debug keystore. Sign new release builds with the same key and `adb install -r`: a different key means uninstall = vault lost. Check before installing.
+- The installed release app holds the owner's REAL vault (since 2026-11-03): never test with it, never clear its data. It is signed with the PC's debug keystore. Sign new release builds with the same key and `adb install -r`: a different key means uninstall = vault lost. Check before installing.
 - `connectedDebugAndroidTest` uninstalls the debug app (and its data) afterwards.
 - Compose UI tests: right after typing, the keyboard animation can move a button and an injected tap misses; click via `performSemanticsAction(OnClick)`.
 - `Session.lockEvents` fire even when nothing is open; only reset screens when a vault, kit or import was actually open. Save a new vault/recovery key **before** showing the key.

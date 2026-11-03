@@ -57,8 +57,14 @@ Huawei (Android 10) and Motorola (Android 12) not tested with the Task 06 build 
 - [x] ~~Live tests~~ → done 2026-11-03: debug app restore from the vault list (fresh pairing, revoked after); release app new recovery key (password asked first) → r11 uploaded → fingerprint unlock turned off → test restore "r11 decrypts: 5 entries, same as on this phone" → version history r10 asks for "the master password this version was saved with" and opens; chip green.
 - [ ] Owner: after any key change, turn fingerprint unlock on again (Settings → Security). The new fingerprint key also requires an unlocked phone (L2).
 
+## Release app now holds the owner's REAL vault (2026-11-03)
+- Done with the owner, step by step: backup verified; 5 test entries deleted; new master password (typed by the owner); vault key rotated with a new recovery key (Emergency Kit PDF saved on the phone by the owner); sections Personal + Work; the owner's personal and work desktop vaults imported into them (temporary copies on the phone deleted afterwards; the source files are untouched). Revision 22 uploaded, chip green, test restore OK. Fingerprint unlock is off (the owner turns it on).
+- **From now on the release app (`com.spirtosan.mobilevault`) is off-limits** for tests: only install newer release builds over it (same signing key, `adb install -r`). Use the debug app for all tests.
+- Found during the import (fix in the next task): on the import preview, "New section…" is preselected with a name taken from the file ("personal.vault" → "Personal"); if that section already exists, Import fails with "already exists" (only a short snackbar, looks like nothing happened). Fix: preselect the existing section with that name.
+- Next: Task 11 (`docs/CLAUDE_CODE_TASK_11.md`, not started yet; the owner approved its server change for Part A only, and in Part B only the debug test vaults may be deleted on the server, never the `xiaomi` vault or old personal/work vaults).
+
 ## Next
-- Owner: import the two old vaults into sections (Settings → Sections → Personal + Work → Settings → Import → each old vault → its section). Owner check left: HyperOS battery settings. Then Huawei/Motorola when wanted. Later: autofill, multi-device merge, PVAULT2 in the desktop app, the "Later" items of `CODE_REVIEW_01.md` (L1, L3–L6).
+- Owner check left: HyperOS battery settings. Then Huawei/Motorola when wanted. Later: autofill, multi-device merge, PVAULT2 in the desktop app, the "Later" items of `CODE_REVIEW_01.md` (L1, L3–L6).
 
 ## How work is done
 - The cloud Claude session writes code/docs into `C:\Users\spirt\mobilevault` (no GitHub access from there). The local **Claude Code** session builds, deploys to the server and pushes to GitHub using `docs/CLAUDE_CODE_TASK_NN.md` files (01–10 done).
