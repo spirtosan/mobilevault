@@ -13,25 +13,26 @@
 | Storage | one encrypted vault file in `filesDir` plus a snapshots folder (no database; everything is encrypted in a single blob, like the desktop app) |
 
 ## Feature parity with desktop v1.3
-- [ ] Create vault / unlock with master password
-- [ ] Entry list with search (Service, Username, URL) and sort
-- [ ] Add / edit / delete entry (Service and Password required); delete asks for confirmation
-- [ ] Show/hide password, copy username, password and URL, open URL
-- [ ] Password strength meter (upgrade to zxcvbn-style scoring)
-- [ ] Clipboard auto-clear (configurable, default 30 s)
-- [ ] Auto-lock after inactivity (default 5 min) **and** on app background (configurable grace period)
-- [ ] Change master password
-- [ ] Atomic saves
-- [ ] Import desktop `.vault` (PVAULT1); export PVAULT1 for desktop
+- [x] Create vault / unlock with master password
+- [x] Entry list with search (Service, Username, URL) and sort
+- [x] Add / edit / delete entry (Service and Password required); delete asks for confirmation
+- [x] Show/hide password, copy username, password and URL, open URL
+- [x] Password strength meter (own estimator with bits; zxcvbn-style scoring still open)
+- [x] Clipboard auto-clear (configurable, default 30 s)
+- [x] Auto-lock after inactivity (default 5 min) **and** on app background (configurable grace period)
+- [x] Change master password
+- [x] Atomic saves
+- [x] Import desktop `.vault` (PVAULT1); export PVAULT1 for desktop
 
 ## New for mobile
-- [ ] Biometric unlock (fingerprint/face) as a convenience; the master password is still required after reboot, every 7 days, and after 5 failed biometric attempts
-- [ ] Recovery key + Emergency Kit, optional (see BACKUP_AND_RECOVERY.md)
-- [ ] Master password reminder: hint + periodic confirmation (see below)
-- [ ] Remote backups to own Ubuntu server via HTTPS backup API (see BACKUP_AND_RECOVERY.md); optional SAF/USB copy; version history; restore; test restore; backup health indicator
-- [ ] Local snapshot history
-- [ ] Password generator (length, character sets, passphrase mode)
-- [ ] Notes field, favourites, tags
+- [x] Biometric unlock (fingerprint, BIOMETRIC_STRONG) as a convenience; the master password is still required after reboot, every 7 days (3/7/14/30), after 5 failed biometric attempts and after a new fingerprint is enrolled (Task 07)
+- [x] Recovery key + Emergency Kit, optional (see BACKUP_AND_RECOVERY.md)
+- [x] Master password reminder: hint + periodic confirmation + yearly Emergency Kit check (see below, Task 07)
+- [x] Remote backups to own Ubuntu server via HTTPS backup API (see BACKUP_AND_RECOVERY.md); version history; restore; test restore; backup health indicator (Task 07)
+- [ ] Optional SAF/USB copy
+- [x] Local snapshot history
+- [x] Password generator (length, character sets, passphrase mode)
+- [x] Notes field, favourites (tags: not in the UI yet)
 - [ ] (Phase 2) Android Autofill service, multi-device merge, TOTP codes
 
 ## Master password reminder
