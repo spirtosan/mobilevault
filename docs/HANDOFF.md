@@ -1,6 +1,6 @@
 # Handoff for the next session
 
-_Last updated: 2026-11-03. Read this first, then `docs/STATUS.md`._
+_Last updated: 2026-11-04. Read this first, then `docs/STATUS.md`._
 
 > **Permanent rule (owner, 2026-11-03; copy it into every future task's Rules):** **The release app (`com.spirtosan.mobilevault`) holds the owner's real vault.** Never open, unlock, read, back up, restore over, clear, uninstall, re-pair or disconnect it, and never take screenshots of it. The only exception is installing a newer release build **over** it (same signing key, `adb install -r`), which keeps its data. All tests use the **debug app** (`com.spirtosan.mobilevault.debug`) with test data only. The old test password is retired; don't use it on the release app. On the server, the device `xiaomi` (the release app) stays active and untouched, and the owner's real vault `274cdb88-…` is never deleted, trashed, restored or read. The same protection for the owner's wife's vault `85ed3926…` and her device `<WIFE_DEVICE>` (paired 2026-11-03): never delete, trash, restore or revoke them.
 
@@ -24,7 +24,7 @@ The main goal is **maximum protection against losing passwords**: strong offline
 
 ## 3. How we work (important)
 - **Cloud Claude session** (claude.ai, project "Mobile Vault"): designs and writes code/docs straight into `C:\Users\spirt\mobilevault` through the linked-computer tools (`device_bash`, `device_commit_files`). It **cannot** reach GitHub, Maven/Google repos or the server. It can compile and test Kotlin with the Kotlin 2.0.21 compiler in `/opt/gradle-8.14.3/lib` plus a JUnit stand-in, and run Python tests.
-- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–12 are done; the next new one is 13.**
+- **Local Claude Code** (on the owner's PC): has SSH to the server and push access to GitHub. It builds with Gradle and deploys. It receives work as `docs/CLAUDE_CODE_TASK_NN.md` files plus a short prompt the owner pastes. **Tasks 01–13 are done; the next new one is 14** (planned: "install from zero" drill on the owner's phone).
 - The owner relaying a task **is** the approval for the changes listed in it. Server changes always use the safeguards: back up files first, run `nginx -t` / `sshd -t` before reloading, keep a session open, and use auto-rollback timers for firewall/SSH changes.
 - The repo is **public**: use **placeholders only** (`<DOMAIN>`, `<DATA_DISK>`, `<MIRROR_DISK>`, `<LAN_SUBNET>`, `<ADMIN_USER>`). No IPs, hostnames, usernames, passwords or keys in commits. No passwords in chat either.
 - The owner prefers plain explanations, a recommendation, and a ready-to-paste prompt for Claude Code.
@@ -70,11 +70,15 @@ The release app now holds the owner's real vault (sections Personal / Work, new 
 ### Done: Task 12 (2026-11-03): APK + install guide for the owner's wife
 `C:\Users\spirt\mobilevault-release\` (outside git): `MobileVault-0.3.0.apk` + `.sha256`, `INSTALL.txt` (her guide, English, exact screen names), `OWNER_STEPS.txt`. Her phone has her own vault and was paired by the owner on 2026-11-03 as device `<WIFE_DEVICE>` (a later new phone: `<WIFE_DEVICE>-2`); her vault `85ed3926…` uploaded r1. Protected like the owner's vault (permanent rule).
 
+### Done: Task 13 (2026-11-04): UX polish + full copy, release 0.3.1
+Release builds show plain words instead of `mvault-admin` commands (debug keeps them); Create screen: "Unlock takes about N seconds" with the Argon2 parameters under "Details"; restore list "Vault from <device>" + date · versions · short ID, most recent first; fingerprint reason under the switch (+ "Open phone settings"; the Xiaomi reports SUCCESS / Class 3); **Settings → "Save a full copy"** and **Welcome → "Restore from a file"**. Release 0.3.1 (versionCode 3) installed over the real-vault app with `adb install -r` (not opened). `C:\Users\spirt\mobilevault-release\MobileVault-0.3.1.apk` for the wife's phone. Multi-device sync dropped (owner). Screenshots `docs/screenshots/task13-*.png`.
+
 ### Next
-Owner: open the release app and check that it unlocks with Personal 35 / Work 6. Owner check: HyperOS battery settings.
+Owner: open the release app and check that it unlocks with Personal 35 / Work 6 (now on 0.3.1). Then **Settings → "Save a full copy"** to the offline USB stick, and repeat now and then (e.g. monthly). Send the wife `MobileVault-0.3.1.apk` (+ the updated `INSTALL.txt`). Owner check: HyperOS battery settings.
+Task 14 (planned): "install from zero" drill on the owner's phone.
 
 ### Later
-Autofill service, multi-device merge, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`).
+Autofill service, adding PVAULT2 to the desktop app (start from `android/tools/pvault2.py`). Multi-device sync: dropped (owner, 2026-11-04).
 
 ## 6. Open to-dos outside the app
 Owner: copy `vault-spare.key` to an offline USB stick; check that the old tracker seed passwords (given in chat on 2026-10-30) aren't reused anywhere; test `sudo -v` as the admin user.

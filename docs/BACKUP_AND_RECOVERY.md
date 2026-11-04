@@ -9,7 +9,7 @@ Main principle: **zero-knowledge.** Only the already-encrypted vault file ever l
 | 2 | Local snapshot history in app-private storage: last 20 saves + 1 per day for 30 days | accidental deletion, bad edits |
 | 3 | **Remote backup** to 1 or more destinations, versioned | phone lost, stolen, broken or reset |
 | 4 | Recovery key / Emergency Kit (paper), **optional** | forgotten master password (only if the vault has one) |
-| 5 | Manual export (encrypted file, share sheet) | everything else, user-controlled |
+| 5 | **Full copy** (Settings → Import / Export → "Save a full copy", Task 13): the encrypted PVAULT2 file itself, on a USB stick or another offline place; opens with the master password or recovery key | the server being gone; everything else, user-controlled |
 
 ## Remote destinations (pluggable `BackupTarget` interface)
 ```kotlin
@@ -74,11 +74,14 @@ Fallback: SSH to the server, `mvault-admin pair <name>`, paste the `Payload:` li
 - Setting: "Back up only on these Wi-Fi networks" (optional).
 
 ## Restore flows
-- **New phone / reinstall**: on first launch, choose "Restore from backup", pick a target, list the versions, download, then unlock with the password or recovery key.
+- **New phone / reinstall**: on first launch, choose "Restore from backup", pick a target, list the versions, download, then unlock with the password or recovery key. The vault list (Task 13) shows **"Vault from <device>"**, then last backup date/time · number of versions · short ID (to match the Emergency Kit), most recent first, with the line "Pick the vault from your old phone. Your Emergency Kit shows its ID." No entry counts (the server can't know them: zero-knowledge) and no filtering by device (a new phone has a new device name, so "own vaults only" would hide the right one).
+- **Restore from a file** (Task 13, works without the server): Welcome screen → "Restore from a file" → pick a full copy (`mobilevault-full-YYYY-MM-DD.pvault`, from Settings → "Save a full copy") → master password or recovery key → it becomes this phone's vault and **keeps its Vault ID**, so a later backup continues the same vault on the server (if it still exists). The backup pairing is not in the file: pair again if wanted. A desktop `.vault` (PVAULT1) is detected and offered as "Create new vault" with its entries (the desktop import flow).
 - **Rollback**: Settings → Backups → Version history → preview the entry count and date (requires unlock) → restore. The current state is snapshotted first, so a restore can always be undone.
 - **Test restore** (monthly reminder): downloads the latest remote copy and decrypts it in memory with the current DEK, which proves the backup really works.
 
 ## Multi-device / conflicts
+> **Dropped (owner, 2026-11-04):** multi-device sync is not planned. One vault lives on one phone; the server keeps versions of it. The notes below stay only as background; a revision clash is handled by re-sealing above the server's newest revision (never overwritten).
+
 - Before uploading, read the remote `latest` header (plaintext, authenticated after unlock). If `remote.rev > local base rev` and the device differs, there is a conflict.
 - Phase 1: never overwrite. Upload as `...-conflict-<device>.pvault` and ask the user to choose or merge.
 - Phase 2: automatic merge per entry `id`: newer `modified` wins, and tombstones are respected. Conflicting edits keep both versions.
