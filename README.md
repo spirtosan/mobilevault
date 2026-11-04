@@ -2,6 +2,24 @@
 
 An Android password vault based on **Shu PassVault** (desktop). It keeps the same strong offline encryption and adds protection against **losing** data: versioned, zero-knowledge remote backups to your own Ubuntu server, a master password hint and reminders, a recovery key for a forgotten master password, and local snapshot history.
 
+## Screenshots
+Debug build with test data (no real vault).
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/task13-welcome.png" width="200" alt="Welcome screen"><br>Welcome</td>
+    <td align="center"><img src="docs/screenshots/task06/08-unlock.png" width="200" alt="Unlock screen"><br>Unlock</td>
+    <td align="center"><img src="docs/screenshots/task10/03-list-all.png" width="200" alt="Entry list with sections"><br>Entries and sections</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/task06/05-entry-detail.png" width="200" alt="Entry details"><br>Entry details</td>
+    <td align="center"><img src="docs/screenshots/task06/06-edit-generator.png" width="200" alt="Password generator"><br>Password generator</td>
+    <td align="center"><img src="docs/screenshots/task06/03-emergency-kit.png" width="200" alt="Emergency Kit with recovery key"><br>Emergency Kit</td>
+  </tr>
+</table>
+
+More screenshots, by task: [`docs/screenshots/`](docs/screenshots/).
+
 ## Folder contents
 | Path | What |
 |---|---|
