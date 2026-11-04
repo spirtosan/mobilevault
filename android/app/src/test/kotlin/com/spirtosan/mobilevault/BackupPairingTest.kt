@@ -96,7 +96,7 @@ class BackupPairingTest {
 
     @Test fun httpErrorsMapToPlainWords() {
         assertEquals(Kind.PAIR_CODE, BackupErrors.fromHttp(403, """{"error":"invalid or expired pairing code"}""", pairing = true).kind)
-        assertTrue(BackupErrors.fromHttp(403, null, pairing = true).text.contains("mvault-admin pair"))
+        assertTrue(BackupErrors.fromHttp(403, null, pairing = true, admin = true).text.contains("mvault-admin pair"))
         val revoked = BackupErrors.fromHttp(403, """{"error":"device revoked"}""")
         assertEquals(Kind.DISCONNECTED, revoked.kind)
         assertTrue(revoked.text.contains("disconnected from the server"))

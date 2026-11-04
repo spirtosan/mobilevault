@@ -23,8 +23,12 @@ data class PairingPayload(val url: String, val code: String, val pins: List<Stri
         /** OkHttp CertificatePinner format: base64 of the SHA-256 of the SubjectPublicKeyInfo. */
         val PIN = Regex("^sha256/[A-Za-z0-9+/]{43}=$")
 
-        const val NO_PINS_TEXT = "This pairing code has no server key pins, so the app can't check that it is talking to your " +
-            "server. Check \"server_cert\" and \"backup_pins\" in the server's config, then run mvault-admin pair again."
+        const val NOT_A_CODE = "This is not a Mobile Vault pairing code."
+
+        /** Release builds refuse a code without pins (see [allowWithoutPins]); the admin hint is a detail line (Task 13). */
+        const val NO_PINS_TEXT = "This pairing QR code is incomplete (no server key pins), so the app can't check that it is talking " +
+            "to your server. Ask the person who runs your backup server for a new pairing QR code.\n\n" +
+            "For them: check \"server_cert\" and \"backup_pins\" in the server's config, then run mvault-admin pair again."
 
         /**
          * `mvault-admin pair` always includes pins when the server is set up (code review F6): a code without
@@ -36,12 +40,12 @@ data class PairingPayload(val url: String, val code: String, val pins: List<Stri
         fun parse(text: String): PairingPayload {
             val start = text.indexOf('{')
             val end = text.lastIndexOf('}')
-            if (start < 0 || end < start) throw Invalid("This is not a pairing code from mvault-admin.")
+            if (start < 0 || end < start) throw Invalid(NOT_A_CODE)
             val o = try { Json.parseToJsonElement(text.substring(start, end + 1)).jsonObject } catch (e: Exception) {
-                throw Invalid("This is not a pairing code from mvault-admin.")
+                throw Invalid(NOT_A_CODE)
             }
             fun str(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-            if (str("t") != "mvault-pair") throw Invalid("This is not a pairing code from mvault-admin.")
+            if (str("t") != "mvault-pair") throw Invalid(NOT_A_CODE)
             if ((o["v"] as? JsonPrimitive)?.intOrNull != 1) throw Invalid("Unsupported pairing code version. Update the app.")
             val url = (str("url") ?: "").trimEnd('/')
             val uri = try { URI(url) } catch (e: Exception) { throw Invalid("The server address in the pairing code is invalid.") }

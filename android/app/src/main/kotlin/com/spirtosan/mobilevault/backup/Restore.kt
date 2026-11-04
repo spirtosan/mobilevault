@@ -5,6 +5,8 @@ import com.spirtosan.mobilevault.crypto.VaultHeader
 import com.spirtosan.mobilevault.crypto.VaultPayload
 import com.spirtosan.mobilevault.crypto.WrongKeyException
 import com.spirtosan.mobilevault.crypto.VaultFormatException
+import java.time.Instant
+import java.time.OffsetDateTime
 
 /** Restore, version history and test restore: the parts that don't touch Android. */
 object Restore {
@@ -26,6 +28,24 @@ object Restore {
     fun shortId(vaultId: String) = "Vault " + vaultId.take(8) + "…"
 
     fun newestFirst(revs: List<RemoteRev>) = revs.sortedByDescending { it.rev }
+
+    /** Restore list (Task 13): most recent backup first; rows without a readable time go last. */
+    fun mostRecentFirst(vaults: List<RemoteVault>): List<RemoteVault> = vaults.sortedWith(
+        compareByDescending<RemoteVault> { runCatching { OffsetDateTime.parse(it.latestTime).toInstant() }.getOrNull() ?: Instant.MIN }
+            .thenByDescending { it.latestRev })
+
+    /** "Vault from xiaomi"; the short ID when the server has no device name. */
+    fun vaultTitle(v: RemoteVault) = if (v.device.isBlank()) shortId(v.vaultId) else "Vault from ${v.device.trim()}"
+
+    /**
+     * "3 Nov 2026, 10:00 · 42 versions · ID 1a2b3c4d…": only what the server already knows (zero-knowledge:
+     * no entry counts). The short ID stays so it can be matched with the Emergency Kit.
+     */
+    fun vaultDetails(v: RemoteVault, time: (String) -> String): String = listOfNotNull(
+        v.latestTime.takeIf { it.isNotEmpty() }?.let(time),
+        v.revisions.takeIf { it > 0 }?.let { if (it == 1) "1 version" else "$it versions" },
+        "ID " + v.vaultId.take(8) + "…",
+    ).joinToString(" · ")
 
     /** Download a revision and make sure it is the file we asked for (PVAULT2, same vault_id and rev). */
     suspend fun fetch(target: BackupTarget, vaultId: String, rev: Long): ByteArray =

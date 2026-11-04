@@ -1,6 +1,10 @@
 package com.spirtosan.mobilevault.ui
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
@@ -15,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -30,6 +36,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.spirtosan.mobilevault.BuildConfig
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.spirtosan.mobilevault.security.BiometricPolicy
@@ -37,14 +45,45 @@ import com.spirtosan.mobilevault.security.Reminders
 import javax.crypto.Cipher
 
 /** Null if a strong biometric (fingerprint) can be used; otherwise why not, in plain words. */
-fun biometricUnavailableReason(context: Context): String? = when (BiometricManager.from(context).canAuthenticate(BIOMETRIC_STRONG)) {
+fun biometricUnavailableReason(context: Context): String? = biometricReasonFor(strongBiometricStatus(context))
+
+/** `canAuthenticate(BIOMETRIC_STRONG)`; logged in debug builds (Task 13: why is the switch off on this phone?). */
+fun strongBiometricStatus(context: Context): Int = BiometricManager.from(context).canAuthenticate(BIOMETRIC_STRONG).also {
+    if (BuildConfig.DEBUG) Log.d("MobileVault", "canAuthenticate(BIOMETRIC_STRONG) = $it (${biometricStatusName(it)})")
+}
+
+fun biometricStatusName(code: Int) = when (code) {
+    BiometricManager.BIOMETRIC_SUCCESS -> "SUCCESS"
+    BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "NONE_ENROLLED"
+    BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "NO_HARDWARE"
+    BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "HW_UNAVAILABLE"
+    BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED -> "SECURITY_UPDATE_REQUIRED"
+    BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED -> "UNSUPPORTED"
+    BiometricManager.BIOMETRIC_STATUS_UNKNOWN -> "UNKNOWN"
+    else -> "code $code"
+}
+
+/**
+ * Plain-word reason for a `canAuthenticate(BIOMETRIC_STRONG)` result, null on success. Only strong (Class 3)
+ * biometrics are used: a weak sensor can't unlock the Keystore key that wraps the vault key (security decision).
+ */
+fun biometricReasonFor(code: Int): String? = when (code) {
     BiometricManager.BIOMETRIC_SUCCESS -> null
-    BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "No fingerprint is enrolled. Add one in the phone's settings first."
-    BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "This phone has no fingerprint sensor of the strong class."
-    BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "The fingerprint sensor is not available right now."
+    BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> NONE_ENROLLED_TEXT
+    BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE ->
+        "This phone has no fingerprint sensor that is secure enough (Class 3 / strong). Use your master password."
+    BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "The fingerprint sensor is not available right now. Try again later."
     BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED -> "The phone needs a security update before fingerprint unlock can be used."
     else -> "Fingerprint unlock is not available on this phone."
 }
+
+const val NONE_ENROLLED_TEXT = "Set up a fingerprint in the phone's Settings → Fingerprint first, then come back here."
+
+/** The system screen to add a fingerprint: the enrol screen on Android 11+, else the security settings. */
+fun fingerprintSettingsIntent(): Intent =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        Intent(Settings.ACTION_BIOMETRIC_ENROLL).putExtra(Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED, BIOMETRIC_STRONG)
+    else Intent(Settings.ACTION_SECURITY_SETTINGS)
 
 /**
  * BiometricPrompt with a Keystore cipher (CryptoObject): the cipher only works after a real
@@ -92,17 +131,43 @@ fun offerBiometricUnlock(vm: AppViewModel, activity: FragmentActivity) {
 @Composable
 internal fun BiometricSettings(vm: AppViewModel) {
     val context = LocalContext.current
-    val unavailable = remember { biometricUnavailableReason(context) }
+    // Checked again every time the screen comes back (Task 13): e.g. after adding a fingerprint in the phone's settings.
+    var status by remember { mutableStateOf(strongBiometricStatus(context)) }
+    // Like the file pickers: a short trip to the phone's settings doesn't trigger the background lock (idle and screen-off locks still apply).
+    var inPhoneSettings by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        status = strongBiometricStatus(context)
+        if (inPhoneSettings) { inPhoneSettings = false; vm.externalDone() }
+        onPauseOrDispose { }
+    }
+    val unavailable = biometricReasonFor(status)
     val days by vm.biometricDays.collectAsState(BiometricPolicy.DEFAULT_DAYS)
     var askPassword by remember { mutableStateOf(false) }
     var pw by rememberSecret()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Switch(vm.biometricEnabled, { on -> if (on) askPassword = true else vm.disableBiometric() },
             Modifier.testTag("bioSwitch"), enabled = unavailable == null || vm.biometricEnabled,
-            colors = SwitchDefaults.colors(checkedTrackColor = Palette.orange, checkedThumbColor = Palette.onOrange))
+            colors = SwitchDefaults.colors(checkedTrackColor = Palette.orange, checkedThumbColor = Palette.onOrange,
+                uncheckedThumbColor = Palette.fgSecondary, uncheckedTrackColor = Palette.bgInput, uncheckedBorderColor = Palette.fgSecondary))
         Spacer(Modifier.width(10.dp)); Text("Unlock with fingerprint", color = Palette.fgPrimary)
     }
-    if (unavailable != null) Muted(unavailable)
+    if (unavailable != null && !vm.biometricEnabled) {
+        // normal text colour, right under the switch (Task 13: the faint line was easy to miss)
+        Text(unavailable, color = Palette.fgPrimary, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("bioReason"))
+        if (status == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) ColorButton("Open phone settings", {
+            vm.externalStarted(); inPhoneSettings = true
+            val opened = runCatching { context.startActivity(fingerprintSettingsIntent()) }.isSuccess ||
+                runCatching { context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }.isSuccess
+            if (!opened) {
+                inPhoneSettings = false; vm.externalDone()
+                vm.fail("Couldn't open the phone's settings. Open Settings → Fingerprint yourself.")
+            }
+        }, Palette.steel, Modifier.fillMaxWidth().testTag("bioOpenSettings"), Icons.Filled.Settings)
+    } else if (unavailable != null) Muted(unavailable)
+    else if (!vm.biometricEnabled)
+        // Task 13: an "off" switch looks grey on the dark theme; say that it can be turned on.
+        Text("Off. Tap the switch to turn it on: you enter your master password once, then touch the sensor.",
+            color = Palette.fgPrimary, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("bioOffHint"))
     else if (vm.biometricEnabled) {
         ChoiceRow("Ask for the master password every", BiometricPolicy.DAY_CHOICES, days, { "$it days" }) { vm.setBiometricDays(it) }
         Muted("The master password is also needed after a restart and after ${BiometricPolicy.MAX_FAILURES} failed fingerprint attempts.")

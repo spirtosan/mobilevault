@@ -25,6 +25,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import com.spirtosan.mobilevault.crypto.RecoveryKey
 import com.spirtosan.mobilevault.ui.AppViewModel
+import com.spirtosan.mobilevault.backup.AdminTexts
+import com.spirtosan.mobilevault.backup.RemoteVault
+import com.spirtosan.mobilevault.ui.biometricReasonFor
+import com.spirtosan.mobilevault.ui.strongBiometricStatus
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -560,5 +566,163 @@ class VaultFlowTest {
             gone("weakWarning")
             waitFor("createSubmit", enabled = true)
         }
+    }
+
+    // ── Task 13 ──────────────────────────────────────────────────────────────
+    private fun vm(sc: ActivityScenario<MainActivity>): AppViewModel {
+        var v: AppViewModel? = null
+        sc.onActivity { v = ViewModelProvider(it)[AppViewModel::class.java] }
+        return v!!
+    }
+
+    private fun textOf(t: String) = tag(t).fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+
+    /** Fix 1: the pairing screen shows the admin command in debug, plain words for the user in release. */
+    @Test
+    fun pairingScreenTextForAdminAndUser() {
+        resetVault()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            waitFor("restore"); tag("restore").performClick()            // not paired: the pairing screen first
+            waitFor("pairCommand")
+            tag("pairCommand").assertTextContains("mvault-admin pair", substring = true)
+        }
+        AdminTexts.show = false                                          // what release builds show
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                waitFor("restore"); tag("restore").performClick()
+                waitFor("pairCommand")
+                assertEquals("Ask the person who runs your backup server for a pairing QR code, then scan it here.", textOf("pairCommand"))
+                assertTrue(rule.onAllNodes(hasText("mvault-admin", substring = true), useUnmergedTree = true)
+                    .fetchSemanticsNodes().isEmpty())
+            }
+        } finally { AdminTexts.show = BuildConfig.DEBUG }
+    }
+
+    /** Fix 3: "Vault from <device>", date · versions · short ID, most recent first, hint line. A fake list (no server). */
+    @Test
+    fun restoreListShowsDeviceDateAndId() {
+        resetVault()
+        val old = RemoteVault("aaaaaaaa-1111-4111-8111-111111111111", 7, "2026-10-01T08:00:00Z", 900, "test-old-phone", 7)
+        val new = RemoteVault("bbbbbbbb-2222-4222-8222-222222222222", 42, "2026-11-03T09:30:00Z", 900, "test-phone", 42)
+        val noName = RemoteVault("cccccccc-3333-4333-8333-333333333333", 1, "2026-09-01T08:00:00Z", 900, "", 1)
+        ActivityScenario.launch(MainActivity::class.java).use { sc ->
+            waitFor("create")
+            sc.onActivity { ViewModelProvider(it)[AppViewModel::class.java].debugShowRestoreList(listOf(noName, old, new)) }
+            waitFor("vault:${new.vaultId}")
+            assertEquals("Pick the vault from your old phone. Your Emergency Kit shows its ID.", textOf("restoreListHint"))
+            assertEquals("Vault from test-phone", textOf("vaultTitle:${new.vaultId}"))
+            assertEquals("Vault from test-old-phone", textOf("vaultTitle:${old.vaultId}"))
+            assertEquals("Vault cccccccc…", textOf("vaultTitle:${noName.vaultId}"))          // no device name: the short ID
+            val d = textOf("vaultDetails:${new.vaultId}")
+            assertTrue(d, d.endsWith(" · 42 versions · ID bbbbbbbb…") && d.contains("2026"))
+            assertTrue(textOf("vaultDetails:${noName.vaultId}").endsWith(" · 1 version · ID cccccccc…"))
+            val top = { id: String -> tag("vault:$id").fetchSemanticsNode().boundsInRoot.top }
+            assertTrue(top(new.vaultId) < top(old.vaultId) && top(old.vaultId) < top(noName.vaultId))      // most recent first
+        }
+    }
+
+    /** Fix 4: the reason is shown right under the switch whenever the phone can't use a strong fingerprint. */
+    @Test
+    fun fingerprintSwitchShowsReason() {
+        resetVault()
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        ActivityScenario.launch(MainActivity::class.java).use {
+            confirmKit(createUntilKit())
+            openSettings()
+            waitFor("bioSwitch")
+            val status = strongBiometricStatus(ctx)
+            val reason = biometricReasonFor(status)
+            if (reason == null) {
+                gone("bioReason")
+                tag("bioSwitch").assertIsEnabled()
+                waitFor("bioOffHint")                                // the "off" state says it can be turned on
+            } else {
+                assertEquals(reason, textOf("bioReason"))
+                tag("bioSwitch").assertIsNotEnabled()
+                if (status == androidx.biometric.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) waitFor("bioOpenSettings")
+            }
+        }
+    }
+
+    /**
+     * Fix 5: Save a full copy → wipe → Restore from a file, with a wrong password, the master password and the
+     * recovery key; every field survives (sections, notes, tags, favourites) and the Vault ID stays. A desktop file
+     * is offered as "Create new vault".
+     */
+    @Test
+    fun fullCopyAndRestoreFromFile() {
+        resetVault()
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val copy = ctx.cacheDir.resolve("task13-full.pvault").apply { delete() }
+        val desktop = ctx.cacheDir.resolve("task13-desktop.vault")
+        desktop.writeBytes(com.spirtosan.mobilevault.crypto.Pvault1.encrypt("Desk-pass-13".toCharArray(),
+            com.spirtosan.mobilevault.crypto.VaultPayload(listOf(com.spirtosan.mobilevault.crypto.Entry(service = "Old", password = "o1")))))
+        ActivityScenario.launch(MainActivity::class.java).use { sc ->
+            val key = createUntilKit()
+            confirmKit(key)
+            runBlocking {
+                app.session.update { p0 ->
+                    val (p1, sec) = com.spirtosan.mobilevault.data.VaultEdits.addSection(p0, "Personal")
+                    p1.copy(entries = p1.entries + listOf(
+                        com.spirtosan.mobilevault.crypto.Entry(service = "Mail", username = "me", password = "m1", notes = "test note",
+                            tags = listOf("home", "mail"), favourite = true, section = sec.id),
+                        com.spirtosan.mobilevault.crypto.Entry(service = "Shop", password = "s1")))
+                }
+            }
+            val expected = app.session.payload.value!!
+            val vaultFile = ctx.filesDir.resolve("vault.pvault")
+            val id = com.spirtosan.mobilevault.crypto.Pvault2.peekHeader(vaultFile.readBytes()).vaultId
+
+            vm(sc).saveFullCopy(Uri.fromFile(copy))
+            rule.waitUntil(10_000) { copy.length() > 0 && !vm(sc).busy }
+            assertTrue(copy.readBytes().contentEquals(vaultFile.readBytes()))       // the exact saved file
+
+            fun wipeAndPick(file: java.io.File) {
+                resetVault()
+                waitFor("restoreFile")
+                vm(sc).restoreFilePicked(Uri.fromFile(file))
+            }
+            fun same() {
+                val p = app.session.payload.value!!
+                assertEquals(expected.entries, p.entries)
+                assertEquals(listOf("Personal"), com.spirtosan.mobilevault.data.VaultEdits.sections(p).map { it.name })
+                assertEquals(id, com.spirtosan.mobilevault.crypto.Pvault2.peekHeader(vaultFile.readBytes()).vaultId)
+            }
+
+            // wrong password, then the master password
+            wipeAndPick(copy)
+            waitFor("restorePw")
+            tag("restoreWhat").assertTextContains("Full copy", substring = true)
+            tag("restorePw").performTextInput("not-the-password")
+            tag("restoreUnlock").clickAction()
+            waitFor("restoreError", ms = 30_000)
+            tag("restoreError").assertTextContains("Wrong password for this file", substring = true)
+            tag("restorePw").performTextInput(pw)
+            tag("restoreUnlock").clickAction()
+            waitFor("add", ms = 30_000)
+            same()
+
+            // the recovery key (then a new master password, as after every recovery-key unlock)
+            wipeAndPick(copy)
+            waitFor("restoreUseKey")
+            tag("restoreUseKey").clickAction()
+            waitFor("restoreKey")
+            tag("restoreKey").performTextInput(key.split("\n", "-").joinToString("-") { it.trim() })
+            tag("restoreUnlock").clickAction()
+            waitFor("pw", ms = 30_000)
+            same()
+            tag("pw").performTextInput(newPw)
+            tag("pw2").performTextInput(newPw)
+            waitFor("newPwSave", enabled = true)
+            tag("newPwSave").performScrollTo().performClick()
+            waitFor("add")
+
+            // a desktop file: offered as a new vault with its entries (the desktop import flow)
+            wipeAndPick(desktop)
+            waitFor("restoreDesktopCreate")
+            tag("restoreDesktopCreate").clickAction()
+            waitFor("importPw")
+        }
+        copy.delete(); desktop.delete()
     }
 }

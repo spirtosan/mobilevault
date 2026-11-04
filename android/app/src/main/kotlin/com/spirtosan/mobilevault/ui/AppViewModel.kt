@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.spirtosan.mobilevault.BuildConfig
 import com.spirtosan.mobilevault.MobileVaultApp
 import com.spirtosan.mobilevault.backup.BackupException
+import com.spirtosan.mobilevault.backup.BackupStatus
 import com.spirtosan.mobilevault.backup.HttpBackupTarget
 import com.spirtosan.mobilevault.backup.RemoteRev
 import com.spirtosan.mobilevault.backup.RemoteVault
@@ -684,6 +685,71 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } finally { password.wipe() }
     }
 
+    // ── full copy (Task 13) ───────────────────────────────────────────────────
+    /** Default name for "Save a full copy": `mobilevault-full-2026-11-04.pvault`. */
+    fun fullCopyName(): String = "mobilevault-full-${LocalDate.now()}.pvault"
+
+    /**
+     * Settings → "Save a full copy": the encrypted vault file exactly as saved (PVAULT2, every field, opens with
+     * the master password or the recovery key). Every change is saved at once ([Session.update]); reading under the
+     * session lock makes sure no save is half done and the file matches the open vault. Written, then read back.
+     */
+    fun saveFullCopy(uri: Uri) = work {
+        val bytes = withContext(Dispatchers.IO) {
+            session.read { v ->
+                val raw = repo.read()
+                val h = Pvault2.peekHeader(raw)
+                check(h.vaultId == v.vaultId && h.rev == v.rev) { "the saved file doesn't match the open vault" }
+                raw
+            }
+        } ?: run { fail("The vault is locked. Unlock it and try again."); return@work }
+        val ok = withContext(Dispatchers.IO) {
+            val cr = getApplication<Application>().contentResolver
+            cr.openOutputStream(uri, "wt")!!.use { it.write(bytes); it.flush() }
+            runCatching { cr.openInputStream(uri)?.use { it.readBytes() }?.contentEquals(bytes) }.getOrNull() ?: true
+        }
+        if (!ok) { fail("The copy could not be written correctly. Try another place."); return@work }
+        message = "Full copy saved (revision ${Pvault2.peekHeader(bytes).rev}). It opens with your master password or recovery key."
+    }
+
+    /** Welcome → "Restore from a file": the picked file is a desktop (PVAULT1) file; offer create + import instead. */
+    var restoreFileIsDesktop by mutableStateOf(false); private set
+    private var restoreFileDesktop: Pair<ByteArray, String>? = null
+
+    /** Welcome → "Restore from a file" (Task 13): a full copy (PVAULT2) is unlocked like a server backup and becomes this phone's vault. */
+    fun restoreFilePicked(uri: Uri) = work {
+        restoreError = null
+        if (repo.exists()) { fail("This phone already has a vault. Restore is only offered for a new vault."); return@work }
+        val raw = withContext(Dispatchers.IO) {
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } ?: run { fail("Can't read that file."); return@work }
+        when {
+            Pvault2.isPvault2(raw) -> {
+                val h = try { Pvault2.peekHeader(raw) } catch (e: VaultFormatException) {
+                    fail("This Mobile Vault file is damaged: ${e.message}"); return@work
+                }
+                restoreRaw = raw
+                restoreHeader = h
+                restoreFromFile = true
+                go(Screen.RestoreUnlock)
+            }
+            Pvault1.isPvault1(raw) -> {
+                restoreFileDesktop = raw to ImportInto.nameFromFile(displayName(uri))
+                restoreFileIsDesktop = true
+            }
+            else -> fail("This is not a Mobile Vault file. Pick a .pvault file saved with \"Save a full copy\".")
+        }
+    }
+
+    /** The desktop-file dialog: "Create new vault" with its entries (the normal desktop import flow). */
+    fun restoreFileAsDesktopImport() {
+        val (raw, name) = restoreFileDesktop ?: return
+        restoreFileDesktop = null; restoreFileIsDesktop = false
+        if (!startImport(raw, name, fromServer = false)) raw.wipe()
+    }
+
+    fun cancelRestoreFileDesktop() { restoreFileDesktop?.first?.wipe(); restoreFileDesktop = null; restoreFileIsDesktop = false }
+
     // ── backup server ─────────────────────────────────────────────────────────
     val backupConfig get() = a.backup.config
     val backupStatus get() = a.backup.status
@@ -765,6 +831,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Header of the downloaded file waiting for the password (restore on a new phone). */
     var restoreHeader by mutableStateOf<VaultHeader?>(null); private set
     private var restoreRaw: ByteArray? = null
+    /** The file being restored comes from "Restore from a file", not from the server (Task 13). */
+    var restoreFromFile by mutableStateOf(false); private set
     /** Version history: the picked revision, decrypted in memory. */
     var preview by mutableStateOf<Restore.Preview?>(null); private set
     /** Version history: the picked file did not open with the current DEK, ask for its password. */
@@ -794,6 +862,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Debug builds only (UI tests, Task 13): show the restore list with these rows, without a server. */
+    fun debugShowRestoreList(list: List<RemoteVault>) {
+        if (!BuildConfig.DEBUG) return
+        remoteVaults = list; manualVaultId = false; restoreError = null
+        backStack.addLast(screen); screen = Screen.RestoreStart
+    }
+
     fun loadRestoreRevisions(vaultIdText: String) = work {
         restoreError = null
         val id = Restore.normalizeVaultId(vaultIdText) ?: run { restoreError = "That is not a Vault ID (36 characters like 1a2b3c4d-…)."; return@work }
@@ -813,6 +888,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val raw = Restore.fetch(target(), id, rev)
             restoreRaw = raw
             restoreHeader = Pvault2.peekHeader(raw)
+            restoreFromFile = false
             go(Screen.RestoreUnlock)
         } catch (e: BackupException) { fail(e.text) }
     }
@@ -828,21 +904,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 else Pvault2.unlockWithRecoveryKey(raw, RecoveryKey.parse(recoveryKeyText ?: ""))
             }
         } catch (e: WrongKeyException) {
-            restoreError = if (password != null) "Wrong password for this backup." else "This recovery key does not open this backup."
+            val what = if (restoreFromFile) "file" else "backup"
+            restoreError = if (password != null) "Wrong password for this $what." else "This recovery key does not open this $what."
             return@work
         } catch (e: IllegalArgumentException) {
             restoreError = e.message ?: "That is not a valid recovery key"; return@work
         } finally { password?.wipe() }
-        // The file is on the server already: record it, so the upload queued by the save has nothing to do.
-        a.backup.updateStatus {
-            it.copy(lastSuccessAt = System.currentTimeMillis(), lastSuccessRev = v.rev, lastSuccessSha = HttpBackupTarget.sha256Hex(raw),
-                lastError = null, stopped = false, needsNewRev = false)
+        val fromFile = restoreFromFile
+        if (!fromFile) {
+            // The file is on the server already: record it, so the upload queued by the save has nothing to do.
+            a.backup.updateStatus {
+                it.copy(lastSuccessAt = System.currentTimeMillis(), lastSuccessRev = v.rev, lastSuccessSha = HttpBackupTarget.sha256Hex(raw),
+                    lastError = null, stopped = false, needsNewRev = false)
+            }
+        } else if (a.backup.isPaired) {
+            // From a file: nothing is known about the server for this vault. The vault keeps its ID, so a backup
+            // continues it there (a revision clash is re-sealed above the server's newest, as always).
+            a.backup.updateStatus { BackupStatus(disconnected = it.disconnected) }
         }
         withContext(Dispatchers.IO) { repo.save(raw) }
         disableBiometric(quiet = true)                // restored vault: another DEK than any old blob
         prefs.clearFailures()
         prefs.setKitPending(false)
-        restoreRaw = null; restoreHeader = null; remoteRevs = emptyList()
+        restoreRaw = null; restoreHeader = null; remoteRevs = emptyList(); restoreFromFile = false
         val rev = v.rev
         if (recoveryKeyText != null) {
             hasRecoveryKey = true
@@ -850,7 +934,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             afterUnlock()
             replace(Screen.NewPassword(forced = true))
         } else openAndShowList(v)
-        message = "Restored revision $rev from the server"
+        message = if (fromFile) "Restored from the file (revision $rev)" else "Restored revision $rev from the server"
     }
 
     fun openHistory() = work {

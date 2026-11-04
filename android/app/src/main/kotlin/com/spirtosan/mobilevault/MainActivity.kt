@@ -28,6 +28,8 @@ class MainActivity : FragmentActivity() {
         // with test data. BuildConfig.DEBUG is a constant false in release, so R8 removes the branch.
         val allowScreenshots = BuildConfig.DEBUG && intent.getBooleanExtra("debug_allow_screenshots", false)
         if (!allowScreenshots) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Debug builds only (Task 13): `--ez debug_user_texts true` shows the release wording (no mvault-admin commands).
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("debug_user_texts", false)) com.spirtosan.mobilevault.backup.AdminTexts.show = false
         // No autofill (Task 11): other password managers / Google Autofill must neither fill nor read our fields.
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         enableEdgeToEdge()

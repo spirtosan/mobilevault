@@ -425,4 +425,5 @@ fun <T> ChoiceRow(label: String, options: List<T>, selected: T, text: (T) -> Str
 }
 
 @Composable
-fun Muted(text: String) = Text(text, color = Palette.fgSecondary, style = MaterialTheme.typography.bodySmall)
+fun Muted(text: String, tag: String? = null) = Text(text, color = Palette.fgSecondary, style = MaterialTheme.typography.bodySmall,
+    modifier = if (tag != null) Modifier.testTag(tag) else Modifier)

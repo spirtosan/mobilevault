@@ -191,6 +191,10 @@ internal fun WarnText(text: String, tag: String? = null) =
 @Composable
 private fun OnboardingScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val pickImport = rememberImportPicker(vm)
+    val pickRestoreFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        vm.externalDone()
+        if (uri != null) vm.restoreFilePicked(uri)
+    }
     Page("", snackbar, busy = vm.busy) {
         BrandHeader("Your passwords, encrypted on this phone.")
         PanelCard {
@@ -198,16 +202,41 @@ private fun OnboardingScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             MainButton("Create new vault", { vm.go(Screen.Create(null)) }, Modifier.fillMaxWidth().testTag("create"), Icons.Filled.Add)
             ColorButton("Import from desktop (.vault)", pickImport, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FolderOpen)
             ColorButton("Restore from backup", { vm.startRestore() }, Palette.steel, Modifier.fillMaxWidth().testTag("restore"), Icons.Filled.CloudDownload)
+            ColorButton("Restore from a file", { vm.externalStarted(); pickRestoreFile.launch(arrayOf("*/*")) }, Palette.steel,
+                Modifier.fillMaxWidth().testTag("restoreFile"), Icons.Filled.FolderOpen, enabled = !vm.busy)
+            Muted("\"Restore from a file\" opens a full copy (.pvault) saved with Settings → Save a full copy.")
         }
     }
+    if (vm.restoreFileIsDesktop) ConfirmDialog(
+        "This is a desktop file",
+        "This file is from the desktop app (.vault), not a full copy of a Mobile Vault. Create a new vault with its entries instead? " +
+            "You'll enter the desktop file's password, then choose a master password for the new vault.",
+        confirm = "Create new vault", confirmColor = Palette.violet, confirmTag = "restoreDesktopCreate",
+        onConfirm = { vm.restoreFileAsDesktopImport() }, onDismiss = { vm.cancelRestoreFileDesktop() },
+    )
 }
 
 @Composable
 private fun CalibrationInfo(vm: AppViewModel) {
     val c = vm.calibration
-    if (c == null) Muted("Measuring how fast this phone unlocks…")
-    else Muted("Unlock takes ~%.1f s on this phone (Argon2id %d MiB, t=%d, p=%d)".format(
-        c.unlockMs / 1000.0, c.params.mKiB / 1024, c.params.t, c.params.p))
+    if (c == null) { Muted("Measuring how fast this phone unlocks…"); return }
+    // Task 13: plain words first; the Argon2 parameters only behind a collapsed "Details" row.
+    var details by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Muted(unlockTimeText(c.unlockMs), "unlockTime")
+        TextButton(onClick = { details = !details }, modifier = Modifier.testTag("calibDetails")) {
+            Text(if (details) "Hide details" else "Details", color = Palette.navFg, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (details) Muted("Argon2id, %d MiB memory, t=%d, p=%d. Measured on this phone when the vault is created."
+        .format(c.params.mKiB / 1024, c.params.t, c.params.p), "calibParams")
+}
+
+/** "Unlock takes about 2 seconds on this phone." (whole seconds); under ~1 s: "less than a second". */
+internal fun unlockTimeText(ms: Long): String {
+    if (ms < 950) return "Unlock takes less than a second on this phone."
+    val s = ((ms + 500) / 1000).coerceAtLeast(1)
+    return "Unlock takes about $s second${if (s == 1L) "" else "s"} on this phone."
 }
 
 @Composable
@@ -700,6 +729,10 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var addKey by remember { mutableStateOf(false) }
     var remove by remember { mutableStateOf(false) }
     val pickImport = rememberImportPicker(vm)
+    val saveFullCopy = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        vm.externalDone()
+        if (uri != null) vm.saveFullCopy(uri)
+    }
     Page("Settings", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard(title = "Security") {
             ChoiceRow("Auto-lock after", Settings.AUTO_LOCK_CHOICES, s.autoLockMinutes, { "$it min" }) {
@@ -744,6 +777,11 @@ private fun SettingsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             ColorButton("Import from the backup server", { vm.openImportFromServer() }, Palette.violet,
                 Modifier.fillMaxWidth().testTag("importServer"), Icons.Filled.CloudDownload, enabled = paired && !vm.busy)
             ColorButton("Export for desktop", { vm.go(Screen.Export) }, Palette.violet, Modifier.fillMaxWidth(), Icons.Filled.FileUpload)
+            ColorButton("Save a full copy", { vm.externalStarted(); saveFullCopy.launch(vm.fullCopyName()) }, Palette.violet,
+                Modifier.fillMaxWidth().testTag("fullCopy"), Icons.Filled.Save, enabled = !vm.busy)
+            Muted("A full copy is the encrypted vault file with everything in it (sections, notes, tags, favourites). " +
+                "It opens with your master password (or your recovery key), also without the backup server: Welcome screen → " +
+                "Restore from a file. Keep it on a USB stick or another safe place. Anyone needs your master password to open it.")
         }
         if (BuildConfig.DEBUG) DebugClockCard(vm)
         PanelCard(title = "About") {

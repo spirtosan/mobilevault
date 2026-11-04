@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.spirtosan.mobilevault.backup.AdminTexts
 import com.spirtosan.mobilevault.backup.BackupErrors
 import com.spirtosan.mobilevault.backup.BackupHealth
 import com.spirtosan.mobilevault.backup.CertExpiry
@@ -109,7 +110,9 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             if (certNotAfter > 0) {
                 val line = "Certificate valid until ${CertExpiry.date(certNotAfter)}"
                 if (CertExpiry.soon(certNotAfter, System.currentTimeMillis()))
-                    WarnText("$line. Connect this phone again (mvault-admin pair) before then, or backups stop.", "certExpiry")
+                    WarnText("$line. " + (if (AdminTexts.show) "Connect this phone again (mvault-admin pair) before then, or backups stop."
+                        else "Before then, ask the person who runs your backup server for a new pairing QR code and connect this phone again, " +
+                            "or backups stop."), "certExpiry")
                 else Muted(line)
             }
             remember { vm.currentVaultId() }?.let { id ->
@@ -160,7 +163,9 @@ internal fun BackupScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     if (confirmDisconnect && cfg != null) ConfirmDialog(
         "Disconnect this phone?",
         "This deletes the backup key, certificate and token on this phone. Backups already on the server stay there.\n\n" +
-            "Also run  mvault-admin revoke ${cfg.device}  on the server, so the old certificate can't be used any more.",
+            (if (AdminTexts.show) "Also run  mvault-admin revoke ${cfg.device}  on the server, so the old certificate can't be used any more."
+            else "Also tell the person who runs your backup server, so they can block this phone's old certificate " +
+                "(this phone's name there: ${cfg.device})."),
         confirm = "Disconnect", confirmColor = Palette.red, confirmTag = "disconnectConfirm",
         onConfirm = { confirmDisconnect = false; vm.disconnectBackup() }, onDismiss = { confirmDisconnect = false },
     )
@@ -175,12 +180,19 @@ internal fun PairingScreen(vm: AppViewModel, snackbar: SnackbarHostState, purpos
     }
     Page("Connect to backup server", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
-            Text("On the server, run:", color = Palette.fgPrimary)
-            Text("mvault-admin pair <name for this phone>", color = Palette.orange, modifier = Modifier.testTag("pairCommand"))
-            Muted("Then scan the QR code it shows, or paste the \"Payload\" line. The code works once, for 10 minutes.")
+            if (AdminTexts.show) {
+                Text("On the server, run:", color = Palette.fgPrimary)
+                Text("mvault-admin pair <name for this phone>", color = Palette.orange, modifier = Modifier.testTag("pairCommand"))
+                Muted("Then scan the QR code it shows, or paste the \"Payload\" line. The code works once, for 10 minutes.")
+            } else {
+                // Task 13: release builds speak to the user; pairing codes are made by whoever runs the server.
+                Text("Ask the person who runs your backup server for a pairing QR code, then scan it here.",
+                    color = Palette.fgPrimary, modifier = Modifier.testTag("pairCommand"))
+                Muted("A pairing QR code works once, for 10 minutes.")
+            }
             ColorButton("Scan QR code", {
                 vm.externalStarted()
-                scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("Scan the QR code from mvault-admin pair")
+                scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("Scan the pairing QR code")
                     .setBeepEnabled(false).setOrientationLocked(false))
             }, Palette.steel, Modifier.fillMaxWidth().testTag("scanQr"), Icons.Filled.QrCodeScanner, enabled = !vm.busy)
         }
@@ -262,8 +274,8 @@ internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     Page("Restore from backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         val list = vm.remoteVaults
         if (list != null && list.isNotEmpty()) {
-            Muted("Vaults backed up on your server, newest first. Tap the one to restore.")
-            list.forEach { v -> VaultRow(v) { vm.loadRestoreRevisions(v.vaultId) } }
+            Muted("Pick the vault from your old phone. Your Emergency Kit shows its ID.", "restoreListHint")
+            Restore.mostRecentFirst(list).forEach { v -> VaultRow(v) { vm.loadRestoreRevisions(v.vaultId) } }
         } else if (list != null) {
             WarnText("The server has no backups yet.", "noRemoteVaults")
         }
@@ -273,7 +285,9 @@ internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 Modifier.fillMaxWidth().testTag("restoreManual"), Icons.Filled.Keyboard)
         } else PanelCard(title = "Vault ID") {
             if (list == null) Muted("This server can't list its vaults. Enter the Vault ID instead.")
-            Muted("It is printed on your Emergency Kit and shown in Settings → Backup. On the server,  mvault-admin stats  lists the IDs of all backed-up vaults.")
+            Muted("It is printed on your Emergency Kit and shown in Settings → Backup. " + if (AdminTexts.show)
+                "On the server,  mvault-admin stats  lists the IDs of all backed-up vaults."
+                else "If you don't have it, the person who runs your backup server can look it up.")
             PlainField(id, { id = it; vm.restoreError = null }, "Vault ID", tag = "restoreVaultId", keyboardType = KeyboardType.Uri)
             vm.restoreError?.let { ErrorText(it, "restoreError") }
             MainButton("Show backups", { vm.loadRestoreRevisions(id) }, Modifier.fillMaxWidth().testTag("restoreLoad"),
@@ -282,7 +296,7 @@ internal fun RestoreStartScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     }
 }
 
-/** One vault on the server: "Vault 1a2b…, revision 42" / "3 Nov 2026, 10:00 · from xiaomi". */
+/** One vault on the server (Task 13): "Vault from xiaomi" / "3 Nov 2026, 10:00 · 42 versions · ID 1a2b3c4d…". */
 @Composable
 internal fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
     Row(
@@ -291,12 +305,9 @@ internal fun VaultRow(v: RemoteVault, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("${Restore.shortId(v.vaultId)}, revision ${v.latestRev}", color = Palette.fgPrimary, fontWeight = FontWeight.Bold)
-            Muted(listOfNotNull(
-                v.latestTime.takeIf { it.isNotEmpty() }?.let { localTime(it) },
-                v.device.takeIf { it.isNotEmpty() }?.let { "from $it" },
-                v.revisions.takeIf { it > 0 }?.let { if (it == 1) "1 version" else "$it versions" },
-            ).joinToString(" · "))
+            Text(Restore.vaultTitle(v), color = Palette.fgPrimary, fontWeight = FontWeight.Bold,
+                modifier = Modifier.testTag("vaultTitle:${v.vaultId}"))
+            Muted(Restore.vaultDetails(v) { localTime(it) }, "vaultDetails:${v.vaultId}")
         }
         Icon(Icons.Filled.CloudDownload, null, tint = Palette.fgSecondary)
     }
@@ -334,9 +345,12 @@ internal fun RestoreUnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
     var useKey by remember { mutableStateOf(false) }
     var pw by rememberSecret()
     var key by rememberSecret()
-    Page("Unlock the backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
+    val file = vm.restoreFromFile
+    Page(if (file) "Unlock the file" else "Unlock the backup", snackbar, onBack = { vm.back() }, busy = vm.busy) {
         PanelCard {
-            Text("Revision ${h.rev}, saved ${localTime(h.updated)}", color = Palette.fgPrimary)
+            Text((if (file) "Full copy, revision ${h.rev}" else "Revision ${h.rev}") + ", saved ${localTime(h.updated)}",
+                color = Palette.fgPrimary, modifier = Modifier.testTag("restoreWhat"))
+            if (file) Muted("Vault ID ${h.vaultId}")
             if (!useKey) {
                 PasswordField(pw, { pw = it; vm.restoreError = null }, "Master password", tag = "restorePw", imeAction = ImeAction.Go,
                     onDone = { if (pw.isNotEmpty()) { vm.restoreUnlock(pw.toCharArray(), null); pw = "" } })
@@ -349,10 +363,12 @@ internal fun RestoreUnlockScreen(vm: AppViewModel, snackbar: SnackbarHostState) 
                 if (useKey) vm.restoreUnlock(null, key) else { vm.restoreUnlock(pw.toCharArray(), null); pw = "" }
             }, Modifier.fillMaxWidth().testTag("restoreUnlock"), Icons.Filled.LockOpen,
                 enabled = !vm.busy && if (useKey) key.isNotBlank() else pw.isNotEmpty())
-            if (h.hasRecoveryKey) TextButton(onClick = { useKey = !useKey; vm.restoreError = null }) {
+            if (h.hasRecoveryKey) TextButton(onClick = { useKey = !useKey; vm.restoreError = null }, modifier = Modifier.testTag("restoreUseKey")) {
                 Text(if (useKey) "Use the master password instead" else "Forgot password? Use recovery key", color = Palette.navFg)
             }
-            Muted("The backup becomes the vault on this phone, and backups continue from this revision.")
+            Muted(if (file) "The file becomes the vault on this phone and keeps its Vault ID. A backup connection is not part of the " +
+                "file: connect to your backup server again in Settings → Backup if you use one."
+                else "The backup becomes the vault on this phone, and backups continue from this revision.")
         }
     }
 }
